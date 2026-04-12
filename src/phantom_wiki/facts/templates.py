@@ -65,6 +65,43 @@ QA_GRAMMAR_STRING = """
     N -> '<name>'
     """
 
+# Question type categories for filtering
+QUESTION_TYPE_BASE = "base"
+QUESTION_TYPE_COMPARISON = "comparison"
+QUESTION_TYPE_MULTI_CONSTRAINT = "multi_constraint"
+QUESTION_TYPE_SUPERLATIVE = "superlative"
+ALL_QUESTION_TYPES = [
+    QUESTION_TYPE_BASE,
+    QUESTION_TYPE_COMPARISON,
+    QUESTION_TYPE_MULTI_CONSTRAINT,
+    QUESTION_TYPE_SUPERLATIVE,
+]
+
+# Extended question subtypes (used as answer_info markers and in generate_dataset)
+COMPARISON_AGE_SUBTYPE = "comparison_age"
+COMPARISON_AGE_YOUNGER_SUBTYPE = "comparison_age_younger"
+COMPARISON_BORN_FIRST_SUBTYPE = "comparison_born_first"
+COMPARISON_COUNT_MORE_SUBTYPE = "comparison_count_more"
+COMPARISON_COUNT_FEWER_SUBTYPE = "comparison_count_fewer"
+MULTI_CONSTRAINT_2_SUBTYPE = "multi_constraint_2"
+MULTI_CONSTRAINT_3_SUBTYPE = "multi_constraint_3"
+SUPERLATIVE_OLDEST_SUBTYPE = "superlative_oldest"
+SUPERLATIVE_YOUNGEST_SUBTYPE = "superlative_youngest"
+SUPERLATIVE_MOST_SUBTYPE = "superlative_most"
+SUPERLATIVE_FEWEST_SUBTYPE = "superlative_fewest"
+
+
+def classify_question_type(question_template: list[str]) -> str:
+    """Classify a question template into one of the extended types based on its structure."""
+    joined = " ".join(question_template)
+    if any(kw in joined for kw in ["older,", "younger,", "born first,", "has more", "has fewer"]):
+        return QUESTION_TYPE_COMPARISON
+    if "and whose" in joined:
+        return QUESTION_TYPE_MULTI_CONSTRAINT
+    if any(kw in joined for kw in ["oldest", "youngest", "with the most", "with the fewest"]):
+        return QUESTION_TYPE_SUPERLATIVE
+    return QUESTION_TYPE_BASE
+
 
 def is_aggregation_question(question: str) -> bool:
     """
@@ -79,7 +116,7 @@ def is_aggregation_question(question: str) -> bool:
     return question.strip().startswith("How many")
 
 
-def generate_templates(grammar: CFG = None, depth=4) -> Iterable:
+def generate_templates(grammar: CFG = None, depth=4, question_types=None) -> Iterable:
     """Generates an iterator of all question templates and corresponding Prolog queries from a CFG.
 
     To generate valid Prolog queries, the grammar is assumed to contain <placeholder> terminals with
@@ -91,11 +128,12 @@ def generate_templates(grammar: CFG = None, depth=4) -> Iterable:
             By default, the grammar is based on QA_GRAMMAR_STRING.
         depth: The maximal depth of the generated tree.
             Default value 4, minimum depth of QA_GRAMMAR_STRING.
+        question_types: List of question type strings to include. If None, only base types.
+            Use ALL_QUESTION_TYPES or a subset like ["base", "comparison", "superlative"].
 
     Returns:
-        An iterator of lists of the form [question_template, prolog_template], where
-        question_template is a list of strings of non-terminal tokens, and
-        prolog_template is of the form [list of query statements: list[str], query answer: str]
+        A list of tuples. Base templates are 3-tuples: (question_template, query_template, answer).
+        Extended templates are 4-tuples: (question_template, query_template, answer_info, question_subtype).
     """
     if grammar is None:
         grammar = CFG.fromstring(QA_GRAMMAR_STRING)
@@ -105,15 +143,283 @@ def generate_templates(grammar: CFG = None, depth=4) -> Iterable:
         # Safe default, assuming the grammar may be recursive:
         depth = (sys.getrecursionlimit() // 3) - 3
 
-    fragments = _generate_tail_template_fragments(grammar, [start], depth, depth)
+    if question_types is None:
+        question_types = [QUESTION_TYPE_BASE]
 
     templates = []
-    for fragment in fragments:
-        question = fragment.q_fragment
-        query = fragment.p_fragment
-        answer = fragment.p_answer
 
-        templates.append((question, query, answer))
+    # Generate base templates from the standard grammar
+    if QUESTION_TYPE_BASE in question_types:
+        fragments = _generate_tail_template_fragments(grammar, [start], depth, depth)
+        for fragment in fragments:
+            templates.append((fragment.q_fragment, fragment.p_fragment, fragment.p_answer))
+
+    # Generate extended templates by composing R_c fragments from the base grammar
+    extended_types = set(question_types) - {QUESTION_TYPE_BASE}
+    if extended_types:
+        rc_nonterminal = Nonterminal("R_c")
+        templates += _generate_extended_templates(grammar, rc_nonterminal, depth, extended_types)
+
+    return templates
+
+
+def _generate_extended_templates(
+    grammar: CFG,
+    rc_nonterminal: Nonterminal,
+    depth: int,
+    extended_types: set[str],
+) -> list[tuple]:
+    """Generate extended question templates by composing R_c fragments from the base grammar.
+
+    Uses R_c fragments (which recurse via R_c -> R | N) as building blocks for comparison,
+    multi-constraint, and superlative question templates. Each R_c fragment already has the
+    correct question text and Prolog query for its chain depth.
+
+    Returns 4-tuples: (question_template, query_template, answer_info, question_subtype).
+    """
+    templates = []
+
+    # Generate R_c fragments at various sub-depths.
+    # We need fragments from depth 3 (minimum for R_c to expand) up to the full depth.
+    # Each fragment carries its own variable numbering based on depth.
+    rc_fragments = _generate_head_template_fragments(grammar, rc_nonterminal, depth, depth)
+
+    if QUESTION_TYPE_COMPARISON in extended_types:
+        templates += _build_comparison_templates(grammar, rc_fragments, depth)
+
+    if QUESTION_TYPE_MULTI_CONSTRAINT in extended_types:
+        templates += _build_multi_constraint_templates(depth)
+
+    if QUESTION_TYPE_SUPERLATIVE in extended_types:
+        templates += _build_superlative_templates(grammar, rc_fragments, depth)
+
+    return templates
+
+
+def _renumber_fragment(fragment: "Fragment", offset: int) -> "Fragment":
+    """Add offset to all numeric subscripts (_N) in a fragment to avoid variable collisions."""
+    pattern = re.compile(r"_(\d+)")
+
+    def add_offset(s):
+        return pattern.sub(lambda m: f"_{int(m.group(1)) + offset}", s)
+
+    return Fragment(
+        q_fragment=[add_offset(t) for t in fragment.q_fragment],
+        p_fragment=[add_offset(t) for t in fragment.p_fragment],
+        p_answer=add_offset(fragment.p_answer) if fragment.p_answer else None,
+    )
+
+
+def _get_person_var(fragment: "Fragment") -> str:
+    """Get the variable/placeholder that resolves to a person from an R_c fragment.
+
+    For N (terminal name): the placeholder like '<name>_1'
+    For R (chain): the answer variable like 'Y_3'
+    """
+    if fragment.p_answer:
+        return fragment.p_answer
+    return fragment.p_fragment[0]
+
+
+def _count_hops(fragment: "Fragment") -> int:
+    """Count the number of resolution hops in an R_c fragment.
+
+    N -> 0 hops (direct name lookup)
+    R -> number of chain steps
+    """
+    if fragment.p_answer is None and len(fragment.p_fragment) <= 1:
+        return 0  # Just a name
+    return len(fragment.p_fragment)
+
+
+def _build_comparison_templates(
+    grammar: CFG, rc_fragments: list["Fragment"], depth: int
+) -> list[tuple]:
+    """Build comparison question templates from pairs of R_c fragments.
+
+    Comparison types:
+    - "Who is older, R_c or R_c?" (age comparison)
+    - "Who is younger, R_c or R_c?" (age comparison, reversed)
+    - "Who was born first, R_c or R_c?" (same as older)
+    - "Who has more RN_p, R_c or R_c?" (count comparison)
+    - "Who has fewer RN_p, R_c or R_c?" (count comparison, reversed)
+    """
+    templates = []
+
+    for left_frag in rc_fragments:
+        # Renumber right operand to avoid variable collisions with left
+        for right_frag_orig in rc_fragments:
+            right_frag = _renumber_fragment(right_frag_orig, depth)
+            left_var = _get_person_var(left_frag)
+            right_var = _get_person_var(right_frag)
+
+            # Age comparisons: older, younger, born first
+            # Query: chain queries + dob lookups + comparison
+            # After reversal in get_answer, execution order is:
+            # chains -> dob lookups -> comparison
+            dob_l_var = f"CmpDL_{depth}"
+            dob_r_var = f"CmpDR_{depth}"
+
+            age_query = (
+                [f"{dob_l_var} @< {dob_r_var}", f"dob({left_var}, {dob_l_var})", f"dob({right_var}, {dob_r_var})"]
+                + left_frag.p_fragment
+                + right_frag.p_fragment
+            )
+
+            for subtype, prefix in [
+                (COMPARISON_AGE_SUBTYPE, ["Who is older,"]),
+                (COMPARISON_AGE_YOUNGER_SUBTYPE, ["Who is younger,"]),
+                (COMPARISON_BORN_FIRST_SUBTYPE, ["Who was born first,"]),
+            ]:
+                q = prefix + left_frag.q_fragment + ["or"] + right_frag.q_fragment + ["?"]
+                # answer_info encodes left/right vars for answer extraction
+                answer_info = (left_var, right_var)
+                templates.append((q, age_query, answer_info, subtype))
+
+            # Count comparisons: "Who has more/fewer RN_p, R_c or R_c?"
+            # Uses a relation_plural placeholder for the counted relation
+            rn_p_d = f"<relation_plural>_{depth * 3}"
+            cnt_l_var = f"CmpCL_{depth}"
+            cnt_r_var = f"CmpCR_{depth}"
+            cnt_yl = f"CmpYL_{depth}"
+            cnt_yr = f"CmpYR_{depth}"
+
+            count_query = (
+                [
+                    f"{cnt_l_var} > {cnt_r_var}",
+                    f"aggregate_all(count, distinct({rn_p_d}({left_var}, {cnt_yl})), {cnt_l_var})",
+                    f"aggregate_all(count, distinct({rn_p_d}({right_var}, {cnt_yr})), {cnt_r_var})",
+                ]
+                + left_frag.p_fragment
+                + right_frag.p_fragment
+            )
+
+            for subtype, prefix in [
+                (COMPARISON_COUNT_MORE_SUBTYPE, ["Who has more", f"{rn_p_d}", ","]),
+                (COMPARISON_COUNT_FEWER_SUBTYPE, ["Who has fewer", f"{rn_p_d}", ","]),
+            ]:
+                q = prefix + left_frag.q_fragment + ["or"] + right_frag.q_fragment + ["?"]
+                answer_info = (left_var, right_var)
+                templates.append((q, count_query, answer_info, subtype))
+
+    return templates
+
+
+def _build_multi_constraint_templates(depth: int) -> list[tuple]:
+    """Build multi-constraint question templates.
+
+    Multi-constraint: "Who is the person whose AN is AV and whose AN is AV?"
+    This is a leaf production (R) that resolves to a person matching multiple attributes.
+    It composes with base questions via R_c -> R.
+
+    The templates use unique depth-based numbering for each attribute pair.
+    """
+    templates = []
+    d = depth
+
+    # 2-attribute multi-constraint: "Who is the person whose AN1 is AV1 and whose AN2 is AV2?"
+    an1 = f"<attribute_name>_{d}"
+    av1 = f"<attribute_value>_{d}"
+    an2 = f"<attribute_name>_{d + 1}"
+    av2 = f"<attribute_value>_{d + 1}"
+    person_var = f"Y_{d}"
+
+    q_2 = ["Who is", "the person whose", an1, "is", av1, "and whose", an2, "is", av2, "?"]
+    query_2 = [f"{an1}({person_var}, {av1})", f"{an2}({person_var}, {av2})"]
+    templates.append((q_2, query_2, person_var, MULTI_CONSTRAINT_2_SUBTYPE))
+
+    # 3-attribute multi-constraint
+    an3 = f"<attribute_name>_{d + 2}"
+    av3 = f"<attribute_value>_{d + 2}"
+    q_3 = [
+        "Who is",
+        "the person whose",
+        an1,
+        "is",
+        av1,
+        "and whose",
+        an2,
+        "is",
+        av2,
+        "and whose",
+        an3,
+        "is",
+        av3,
+        "?",
+    ]
+    query_3 = [f"{an1}({person_var}, {av1})", f"{an2}({person_var}, {av2})", f"{an3}({person_var}, {av3})"]
+    templates.append((q_3, query_3, person_var, MULTI_CONSTRAINT_3_SUBTYPE))
+
+    return templates
+
+
+def _build_superlative_templates(
+    grammar: CFG, rc_fragments: list["Fragment"], depth: int
+) -> list[tuple]:
+    """Build superlative question templates from R_c fragments.
+
+    Superlative types:
+    - "Who is the oldest/youngest RN of R_c?" (age-based)
+    - "Who is the RN of R_c with the most/fewest RN_p?" (count-based)
+
+    The superlative itself is an R production that resolves to a person,
+    and it composes with R_c via R_c -> R.
+    """
+    templates = []
+
+    for rc_frag in rc_fragments:
+        rc_person = _get_person_var(rc_frag)
+
+        # Age-based superlatives: oldest/youngest
+        # R -> 'the oldest/youngest' RN 'of' R_c
+        rel_d = f"<relation>_{depth + 1}"
+        answer_var = f"Y_{depth + 1}"
+        sup_z = f"SupZ_{depth}"
+        sup_d1 = f"SupD_{depth}"
+        sup_d2 = f"SupD2_{depth}"
+
+        for subtype, adj, op in [
+            (SUPERLATIVE_OLDEST_SUBTYPE, "oldest", "@<"),
+            (SUPERLATIVE_YOUNGEST_SUBTYPE, "youngest", "@>"),
+        ]:
+            q = ["Who is", f"the {adj}", rel_d, "of"] + rc_frag.q_fragment + ["?"]
+            # Query order: negation, dob, relation, then chain queries
+            # After reversal in get_answer: chain -> relation -> dob -> negation
+            query = [
+                f"\\+ ({rel_d}({rc_person}, {sup_z}), dob({sup_z}, {sup_d2}), "
+                f"{sup_z} \\= {answer_var}, {sup_d2} {op} {sup_d1})",
+                f"dob({answer_var}, {sup_d1})",
+                f"{rel_d}({rc_person}, {answer_var})",
+            ] + rc_frag.p_fragment
+            templates.append((q, query, answer_var, subtype))
+
+        # Count-based superlatives: most/fewest
+        # R -> 'the' RN 'of' R_c 'with the most/fewest' RN_p
+        cnt_rel = f"<relation_plural>_{depth + 2}"
+        sup_cnt = f"SupC_{depth}"
+        sup_cnt2 = f"SupC2_{depth}"
+        sup_z2 = f"SupZ2_{depth}"
+        sup_w = f"SupW_{depth}"
+        sup_w2 = f"SupW2_{depth}"
+
+        for subtype, phrase, op in [
+            (SUPERLATIVE_MOST_SUBTYPE, "with the most", ">"),
+            (SUPERLATIVE_FEWEST_SUBTYPE, "with the fewest", "<"),
+        ]:
+            q = (
+                ["Who is", "the", rel_d, "of"]
+                + rc_frag.q_fragment
+                + [phrase, cnt_rel, "?"]
+            )
+            # Query: negation-as-failure for count extremum
+            query = [
+                f"\\+ ({rel_d}({rc_person}, {sup_z2}), {sup_z2} \\= {answer_var}, "
+                f"aggregate_all(count, distinct({cnt_rel}({sup_z2}, {sup_w2})), {sup_cnt2}), "
+                f"{sup_cnt2} {op} {sup_cnt})",
+                f"aggregate_all(count, distinct({cnt_rel}({answer_var}, {sup_w})), {sup_cnt})",
+                f"{rel_d}({rc_person}, {answer_var})",
+            ] + rc_frag.p_fragment
+            templates.append((q, query, answer_var, subtype))
 
     return templates
 

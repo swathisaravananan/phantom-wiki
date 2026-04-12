@@ -36,6 +36,12 @@ from .friends.constants import (
     FRIENDSHIP_RELATION_PLURAL_ALIAS,
 )
 
+def _all_placeholders_assigned(query_item: str, query_assignments: dict[str, str]) -> bool:
+    """Check if all <placeholder>_N tokens in a query item are already in query_assignments."""
+    placeholders = re.findall(r"<\w+>_\d+", query_item)
+    return all(p in query_assignments for p in placeholders)
+
+
 FAMILY_RELATION_EASY = [k for k, v in FAMILY_RELATION_DIFFICULTY.items() if v < 2]
 FAMILY_RELATIONS = [k for k, v in FAMILY_RELATION_DIFFICULTY.items()]
 
@@ -621,6 +627,15 @@ def sample_question(
                 )
                 if not is_success:
                     break
+
+            # Extended query predicates (dob, comparisons, negation-as-failure, etc.)
+            # These don't contain unresolved <placeholder> tokens that need active sampling.
+            # Their placeholders (if any) are shared with chain queries processed elsewhere,
+            # so they get filled in by global replacement at the end.
+            elif not re.search(r"<\w+>_\d+", query_template[i]) or _all_placeholders_assigned(
+                query_template[i], query_assignments
+            ):
+                pass  # Static predicate or fully resolved — pass through
 
             else:
                 # Template is not recognized

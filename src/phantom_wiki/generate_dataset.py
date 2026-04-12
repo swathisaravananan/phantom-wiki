@@ -11,13 +11,137 @@ from tqdm import tqdm
 from .core.article import get_articles
 from .facts import get_database
 from .facts.attributes import db_generate_attributes
+from .facts.balanced_sampling import balanced_sample, filter_by_difficulty, sample_questions
+from .facts.balanced_sampling import describe_pool as _describe_pool
+from .facts.extended_questions import (
+    EXTENDED_QUESTION_TYPES,
+    get_extended_answer,
+    is_extended_question,
+    sample_extended_question,
+)
 from .facts.family import db_generate_family
 from .facts.friends import db_generate_friendships
 from .facts.question_difficulty import calculate_query_difficulty
 from .facts.sample import sample_question
-from .facts.templates import generate_templates, is_aggregation_question
+from .facts.templates import (
+    ALL_QUESTION_TYPES,
+    COMPARISON_AGE_SUBTYPE,
+    COMPARISON_AGE_YOUNGER_SUBTYPE,
+    COMPARISON_BORN_FIRST_SUBTYPE,
+    COMPARISON_COUNT_FEWER_SUBTYPE,
+    COMPARISON_COUNT_MORE_SUBTYPE,
+    QUESTION_TYPE_BASE,
+    classify_question_type,
+    generate_templates,
+    is_aggregation_question,
+)
 from .utils import blue, generate_unique_id
 from .utils.get_answer import get_answer
+
+
+def _get_extended_cfg_answer(
+    question: str,
+    query: list[str],
+    answer_info,
+    question_subtype: str,
+    db,
+) -> list[str]:
+    """Extract answers for extended CFG question types.
+
+    For comparison questions: checks if the Prolog query succeeds to determine the winner.
+    For superlative/multi-constraint: runs the Prolog query and extracts the answer variable.
+    """
+    from .utils import decode
+
+    joined = ", ".join(reversed(query))
+
+    # Comparison types: query includes a comparison predicate.
+    # If query succeeds, left operand wins. If fails, right operand wins.
+    if question_subtype in (
+        COMPARISON_AGE_SUBTYPE,
+        COMPARISON_BORN_FIRST_SUBTYPE,
+        COMPARISON_COUNT_MORE_SUBTYPE,
+    ):
+        results = list(db.prolog.query(joined))
+        left_var, right_var = answer_info
+        if results:
+            # Left operand wins — extract its name
+            if left_var in results[0]:
+                return [str(decode(results[0][left_var]))]
+            # left_var is a <name> placeholder already resolved in the query
+            import re
+
+            m = re.match(r'Who is older, (.+?) or', question) or re.match(
+                r'Who was born first, (.+?) or', question
+            ) or re.match(r'Who has more .+?, (.+?) or', question)
+            return [m.group(1)] if m else []
+        else:
+            # Right operand wins
+            # Try to get the right person's name from a query without the comparison
+            no_cmp_query = ", ".join(reversed([q for q in query if "@<" not in q and ">" not in q]))
+            results2 = list(db.prolog.query(no_cmp_query))
+            if results2 and right_var in results2[0]:
+                return [str(decode(results2[0][right_var]))]
+            m = re.match(r'.+ or (.+?)\?', question)
+            return [m.group(1)] if m else []
+
+    elif question_subtype in (COMPARISON_AGE_YOUNGER_SUBTYPE, COMPARISON_COUNT_FEWER_SUBTYPE):
+        # "younger" / "fewer" — query has @< / >, so if it succeeds, left has EARLIER dob / MORE count.
+        # For "younger": left born earlier means left is OLDER, so right is younger (the answer).
+        # For "fewer": left has more, so right has fewer (the answer).
+        results = list(db.prolog.query(joined))
+        left_var, right_var = answer_info
+        if results:
+            # Left won the comparison (older / more) → right is the answer (younger / fewer)
+            no_cmp_query = ", ".join(reversed([q for q in query if "@<" not in q and ">" not in q]))
+            results2 = list(db.prolog.query(no_cmp_query))
+            if results2 and right_var in results2[0]:
+                return [str(decode(results2[0][right_var]))]
+            import re
+
+            m = re.match(r'.+ or (.+?)\?', question)
+            return [m.group(1)] if m else []
+        else:
+            # Left did NOT win → left is younger / fewer → left is the answer
+            no_cmp_query = ", ".join(reversed([q for q in query if "@<" not in q and ">" not in q]))
+            results2 = list(db.prolog.query(no_cmp_query))
+            if results2 and left_var in results2[0]:
+                return [str(decode(results2[0][left_var]))]
+            import re
+
+            m = re.match(r'Who is younger, (.+?) or', question) or re.match(
+                r'Who has fewer .+?, (.+?) or', question
+            )
+            return [m.group(1)] if m else []
+
+    else:
+        # Superlative and multi-constraint: answer_info is a variable name like 'Y_5'
+        results = list(db.prolog.query(joined))
+        if not results:
+            return []
+        return sorted({str(decode(r[answer_info])) for r in results if answer_info in r})
+
+
+def _filter_by_hops(questions: list[dict], min_hops: int = None, max_hops: int = None) -> list[dict]:
+    """Filter questions by hop count (number of Prolog predicates in the query)."""
+    filtered = []
+    for q in questions:
+        prolog_query = q.get("prolog", {}).get("query", [])
+        if isinstance(prolog_query, list):
+            # Count hops as number of chain predicates (exclude static predicates)
+            hops = sum(
+                1
+                for stmt in prolog_query
+                if not stmt.strip().startswith("\\+") and "dob(" not in stmt and "@<" not in stmt and "@>" not in stmt
+            )
+        else:
+            hops = 1
+        if min_hops is not None and hops < min_hops:
+            continue
+        if max_hops is not None and hops > max_hops:
+            continue
+        filtered.append(q)
+    return filtered
 
 
 def generate_dataset(
@@ -42,6 +166,18 @@ def generate_dataset(
     output_dir: str = "./out",
     article_format: str = "txt",
     question_format: str = "json_by_type",
+    balanced: bool = False,
+    min_difficulty: int = None,
+    max_difficulty: int = None,
+    question_types: str = None,
+    min_hops: int = None,
+    max_hops: int = None,
+    sample_count: int = None,
+    sample_difficulty: str = None,
+    sample_min_steps: int = None,
+    sample_max_steps: int = None,
+    sample_types: str = None,
+    describe_pool: bool = False,
 ) -> None:
     """
     Generate a PhantomWiki dataset consisting of family trees, friendship networks,
@@ -187,15 +323,27 @@ def generate_dataset(
     #
     blue("Generating question answer pairs")
     start = time.time()
+
+    # Parse question types
+    if question_types is not None:
+        parsed_qtypes = [t.strip() for t in question_types.split(",")]
+    else:
+        parsed_qtypes = list(ALL_QUESTION_TYPES)
+
     # generate question templates with a given depth
-    templates = generate_templates(depth=question_depth)
+    templates = generate_templates(depth=question_depth, question_types=parsed_qtypes)
+
+    # Separate base templates (3-tuples) from extended templates (4-tuples)
+    base_templates = [t for t in templates if len(t) == 3]
+    extended_cfg_templates = [t for t in templates if len(t) == 4]
+
     # sample questions for each template (i.e., type)
     if question_format == "json_by_type":
         question_dir = os.path.join(output_dir, "questions")
         logging.info(f"Saving questions to: {question_dir}")
         os.makedirs(question_dir, exist_ok=True)
 
-    progbar = tqdm(enumerate(templates), desc="Generating questions", total=len(templates))
+    progbar = tqdm(enumerate(base_templates), desc="Generating questions", total=len(base_templates))
 
     # Populate person name bank for the universe. The list is static across generating questions
     # so create it once and pass it to the question generation function
@@ -250,8 +398,110 @@ def generate_dataset(
         all_questions.append(questions)
         all_queries.append(queries)
 
-    # Get all possible answers/solution traces for the queries
-    answers = [t[2] for t in templates]
+    # Generate extended CFG-based question types (comparison, multi-constraint, superlative)
+    extended_cfg_questions_data = []
+    if extended_cfg_templates:
+        blue("Generating extended CFG question types")
+        for tmpl_idx, tmpl in enumerate(extended_cfg_templates):
+            question_template, query_template, answer_info, question_subtype = tmpl
+            rng = np.random.default_rng(seed)
+            questions = []
+            queries = []
+            attempts = 0
+            max_attempts = num_questions_per_type * num_sampling_attempts
+
+            while len(questions) < num_questions_per_type and attempts < max_attempts:
+                attempts += 1
+                try:
+                    result = sample_question(
+                        question_template,
+                        query_template,
+                        rng,
+                        db,
+                        person_name_bank,
+                        person_name2attr_name_and_val,
+                        person_name2relation_and_related,
+                        easy_mode=easy_mode,
+                        num_sampling_attempts=1,
+                    )
+                    if result is not None:
+                        question, query = result
+                        questions.append(question)
+                        queries.append(query)
+                except (ValueError, AssertionError):
+                    continue
+
+            # Get answers for extended CFG questions
+            for j in range(len(questions)):
+                answer_list = _get_extended_cfg_answer(
+                    questions[j], queries[j], answer_info, question_subtype, db
+                )
+                question_difficulty = calculate_query_difficulty(queries[j])
+                q_type = classify_question_type(question_template)
+                extended_cfg_questions_data.append(
+                    {
+                        "id": generate_unique_id(),
+                        "question": questions[j],
+                        "solution_traces": json.dumps([]),
+                        "answer": answer_list,
+                        "prolog": {"query": queries[j], "answer": str(answer_info)},
+                        "template": question_template,
+                        "type": len(base_templates) + tmpl_idx,
+                        "difficulty": question_difficulty,
+                        "is_aggregation_question": False,
+                        "question_category": question_subtype,
+                    }
+                )
+
+    # Generate legacy extended question types (backward compat, standalone 1-hop)
+    extended_questions_data = []
+    if QUESTION_TYPE_BASE in parsed_qtypes:
+        # Only generate legacy extended questions when base types are included
+        blue("Generating extended question types")
+        for qtype in EXTENDED_QUESTION_TYPES:
+            rng = np.random.default_rng(seed)
+            questions = []
+            queries = []
+            attempts = 0
+            max_attempts = num_questions_per_type * num_sampling_attempts
+            while len(questions) < num_questions_per_type and attempts < max_attempts:
+                attempts += 1
+                result = sample_extended_question(
+                    qtype,
+                    rng,
+                    db,
+                    person_name_bank,
+                    person_name2attr_name_and_val,
+                    person_name2relation_and_related,
+                    easy_mode=easy_mode,
+                    num_sampling_attempts=num_sampling_attempts,
+                )
+                if result is not None:
+                    question, query = result
+                    questions.append(question)
+                    queries.append(query)
+
+            # Get answers for extended questions
+            for j in range(len(questions)):
+                answer_list = get_extended_answer(questions[j], queries[j], qtype, db)
+                question_difficulty = calculate_query_difficulty(queries[j])
+                extended_questions_data.append(
+                    {
+                        "id": generate_unique_id(),
+                        "question": questions[j],
+                        "solution_traces": json.dumps([]),
+                        "answer": answer_list,
+                        "prolog": {"query": queries[j], "answer": "X"},
+                        "template": [qtype],
+                        "type": len(base_templates) + len(extended_cfg_templates) + EXTENDED_QUESTION_TYPES.index(qtype),
+                        "difficulty": question_difficulty,
+                        "is_aggregation_question": False,
+                        "question_category": qtype,
+                    }
+                )
+
+    # Get all possible answers/solution traces for the base queries
+    answers = [t[2] for t in base_templates]
     all_solution_traces, all_final_results = get_answer(
         copy.deepcopy(all_queries),
         db,
@@ -261,7 +511,7 @@ def generate_dataset(
     )
 
     all_full_questions = []
-    progbar = tqdm(enumerate(templates), desc="Generating questions #2", total=len(templates))
+    progbar = tqdm(enumerate(base_templates), desc="Generating questions #2", total=len(base_templates))
 
     for i, (question_template, query_template, answer) in progbar:
         questions = []
@@ -294,7 +544,77 @@ def generate_dataset(
         all_full_questions.extend(questions)
 
         # update progbar
-        progbar.set_description(f"Template ({i+1}/{len(templates)})")
+        progbar.set_description(f"Template ({i+1}/{len(base_templates)})")
+
+    # Append extended CFG questions
+    all_full_questions.extend(extended_cfg_questions_data)
+
+    # Append legacy extended questions
+    all_full_questions.extend(extended_questions_data)
+    if question_format == "json_by_type" and extended_questions_data:
+        for qtype in EXTENDED_QUESTION_TYPES:
+            type_qs = [q for q in extended_questions_data if q.get("question_category") == qtype]
+            if type_qs:
+                type_idx = len(base_templates) + len(extended_cfg_templates) + EXTENDED_QUESTION_TYPES.index(qtype)
+                with open(os.path.join(question_dir, f"type{type_idx}.json"), "w") as file:
+                    json.dump(type_qs, file, indent=4)
+
+    # Apply hop-count filtering
+    if min_hops is not None or max_hops is not None:
+        blue("Filtering questions by hop count")
+        all_full_questions = _filter_by_hops(all_full_questions, min_hops, max_hops)
+        logging.info(f"After hop filtering: {len(all_full_questions)} questions")
+
+    # Apply difficulty-based filtering and balanced sampling
+    if min_difficulty is not None or max_difficulty is not None:
+        blue("Filtering questions by difficulty range")
+        all_full_questions = filter_by_difficulty(all_full_questions, min_difficulty, max_difficulty)
+        logging.info(f"After filtering: {len(all_full_questions)} questions")
+
+    if balanced:
+        blue("Applying difficulty-balanced sampling")
+        all_full_questions = balanced_sample(all_full_questions)
+        logging.info(f"After balanced sampling: {len(all_full_questions)} questions")
+
+    # Describe pool (print breakdown and exit)
+    if describe_pool:
+        pool_info = _describe_pool(all_full_questions)
+        blue("Question Pool Breakdown")
+        logging.info(f"Total questions: {pool_info['total']}")
+        logging.info("")
+        logging.info("By difficulty level:")
+        for level, count in pool_info["by_difficulty"].items():
+            logging.info(f"  {level:>10s}: {count}")
+        logging.info("")
+        logging.info("By question type:")
+        for qtype, count in pool_info["by_type"].items():
+            logging.info(f"  {qtype:>20s}: {count}")
+        logging.info("")
+        logging.info("By difficulty and type:")
+        for level, type_counts in pool_info["by_difficulty_and_type"].items():
+            if type_counts:
+                logging.info(f"  {level}:")
+                for qtype, count in type_counts.items():
+                    logging.info(f"    {qtype:>20s}: {count}")
+        return
+
+    # Apply exact sampling (--sample-count)
+    if sample_count is not None:
+        blue("Sampling exact number of questions")
+        parsed_sample_types = None
+        if sample_types is not None:
+            parsed_sample_types = [t.strip() for t in sample_types.split(",")]
+        all_full_questions = sample_questions(
+            all_full_questions,
+            count=sample_count,
+            difficulty=sample_difficulty,
+            question_types=parsed_sample_types,
+            min_steps=sample_min_steps,
+            max_steps=sample_max_steps,
+            seed=seed,
+        )
+        logging.info(f"After sampling: {len(all_full_questions)} questions")
+
     timings["questions_generate"] = time.time() - start
 
     blue("Saving questions")
