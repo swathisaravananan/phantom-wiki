@@ -7,12 +7,21 @@ from .attributes import ATTRIBUTE_RULES_PATH
 from .database import Database
 from .family import FAMILY_RULES_BASE_PATH, FAMILY_RULES_DERIVED_PATH
 from .friends import FRIENDSHIP_RULES_PATH
+from .inverse_relations import register_inverse_predicates
 
 
-def get_database(*data_paths) -> Database:
+def get_database(*data_paths, register_inverses: bool = False) -> Database:
     """
     Get a Prolog database with built-in rules.
     Add facts to the database from data_paths if provided.
+
+    Args:
+        data_paths: Paths to Prolog fact files to consult.
+        register_inverses: If True, register inverse predicates for
+            bidirectional sampling.
+
+    Returns:
+        A Database instance with all rules and facts loaded.
     """
     db = Database(
         FAMILY_RULES_BASE_PATH,
@@ -26,6 +35,9 @@ def get_database(*data_paths) -> Database:
         for path in data_paths:
             logging.info(f"- {path}")
             db.consult(path)
+
+    if register_inverses:
+        register_inverse_predicates(db)
 
     return db
 
@@ -91,6 +103,25 @@ question_parser.add_argument(
     help="Filter questions to maximum hop count (inclusive)",
 )
 question_parser.add_argument(
+    "--min-constraints",
+    type=int,
+    default=None,
+    help="Filter questions to minimum constraint count (inclusive)",
+)
+question_parser.add_argument(
+    "--max-constraints",
+    type=int,
+    default=None,
+    help="Filter questions to maximum constraint count (inclusive)",
+)
+question_parser.add_argument(
+    "--sample-difficulty-level",
+    type=str,
+    default=None,
+    choices=["trivial", "easy", "medium", "hard", "extreme"],
+    help="Filter questions by structured difficulty level before other filters",
+)
+question_parser.add_argument(
     "--sample-count",
     type=int,
     default=None,
@@ -125,4 +156,25 @@ question_parser.add_argument(
     "--describe-pool",
     action="store_true",
     help="Print a breakdown of the question pool by difficulty and type, then exit (no sampling)",
+)
+question_parser.add_argument(
+    "--sampling-method",
+    type=str,
+    default="backward",
+    choices=["backward", "bidirectional"],
+    help="Sampling method for question generation (default: backward)",
+)
+question_parser.add_argument(
+    "--anchor-strategy",
+    type=str,
+    default="random",
+    choices=["random", "balanced", "start", "middle", "end"],
+    help="Anchor placement strategy for bidirectional sampling (default: random)",
+)
+question_parser.add_argument(
+    "--answer-position",
+    type=str,
+    default="head",
+    choices=["head", "tail", "random"],
+    help="Position of the answer in the relation chain (default: head)",
 )

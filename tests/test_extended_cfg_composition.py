@@ -48,8 +48,11 @@ from tests.phantom_wiki.facts import DATABASE_SMALL_PATH
 # Fixtures
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def db():
-    """Load the small test database."""
+def db(request):
+    """Load the test database. Use --db-path to override with a custom DB."""
+    custom_path = request.config.getoption("--db-path", default=None)
+    if custom_path:
+        return get_database(str(custom_path.resolve()))
     return get_database(DATABASE_SMALL_PATH)
 
 
@@ -68,7 +71,8 @@ def caches(db, person_names):
     return attr_cache, rel_cache
 
 
-def _sample_extended(template, rng, db, person_names, caches, max_attempts=50):
+def _sample_extended(template, rng, db, person_names, caches, max_attempts=50,
+                     collector=None, test_name=None):
     """Helper to sample a question from an extended template (4-tuple)."""
     question_template, query_template, answer_info, subtype = template
     attr_cache, rel_cache = caches
@@ -86,6 +90,15 @@ def _sample_extended(template, rng, db, person_names, caches, max_attempts=50):
                 num_sampling_attempts=1,
             )
             if result is not None:
+                if collector is not None and test_name is not None:
+                    question, query = result
+                    collector.add(
+                        test_name=test_name,
+                        question=question,
+                        query=query,
+                        subtype=subtype,
+                        template=question_template,
+                    )
                 return result
         except (ValueError, AssertionError):
             continue
@@ -178,7 +191,7 @@ class TestTemplateGeneration:
 # Comparison tests
 # ---------------------------------------------------------------------------
 class TestComparison:
-    def test_comparison_depth_1(self, db, person_names, caches):
+    def test_comparison_depth_1(self, db, person_names, caches, question_collector):
         """depth 1: 'Who is older, <name> or <name>?'"""
         templates = generate_templates(depth=4, question_types=[QUESTION_TYPE_COMPARISON])
         age_templates = [t for t in templates if t[3] == COMPARISON_AGE_SUBTYPE]
@@ -191,6 +204,9 @@ class TestComparison:
             qtext = " ".join(q)
             assert "older," in qtext
             assert "or" in qtext
+            # Try to sample a concrete question for the dump
+            _sample_extended(tmpl, rng, db, person_names, caches,
+                             collector=question_collector, test_name="comparison_depth_1")
 
     def test_comparison_depth_2(self, db, person_names, caches):
         """depth 2: 'Who is older, the <relation> of <name> or <name>?'"""
@@ -213,7 +229,7 @@ class TestComparison:
         # At depth 6, at least one such template should exist
         assert len(age_templates) > 0
 
-    def test_comparison_answer_correct(self, db, person_names, caches):
+    def test_comparison_answer_correct(self, db, person_names, caches, question_collector):
         """Comparison answer extraction returns the correct person."""
         templates = generate_templates(depth=5, question_types=[QUESTION_TYPE_COMPARISON])
         age_templates = [t for t in templates if t[3] == COMPARISON_AGE_SUBTYPE]
@@ -231,9 +247,15 @@ class TestComparison:
             assert len(answer) > 0
             # Answer should be a person name in the database
             assert answer[0] in person_names
+            if question_collector is not None:
+                question_collector.add(
+                    test_name="comparison_answer_correct",
+                    question=question, query=query, answer=answer,
+                    subtype=subtype, template=tmpl[0],
+                )
             return
 
-    def test_comparison_count(self, db, person_names, caches):
+    def test_comparison_count(self, db, person_names, caches, question_collector):
         """'Who has more <relation_plural>, R_c or R_c?'"""
         templates = generate_templates(depth=5, question_types=[QUESTION_TYPE_COMPARISON])
         count_templates = [t for t in templates if t[3] == COMPARISON_COUNT_MORE_SUBTYPE]
@@ -250,6 +272,12 @@ class TestComparison:
             _, _, answer_info, subtype = tmpl
             answer = _get_extended_cfg_answer(question, query, answer_info, subtype, db)
             assert isinstance(answer, list)
+            if question_collector is not None:
+                question_collector.add(
+                    test_name="comparison_count",
+                    question=question, query=query, answer=answer,
+                    subtype=subtype, template=tmpl[0],
+                )
             return
 
     def test_younger_answer_is_opposite_of_older(self, db, person_names, caches):
@@ -274,7 +302,7 @@ class TestComparison:
 # Multi-constraint tests
 # ---------------------------------------------------------------------------
 class TestMultiConstraint:
-    def test_multi_constraint_2_attrs(self, db, person_names, caches):
+    def test_multi_constraint_2_attrs(self, db, person_names, caches, question_collector):
         """2-attribute: 'Who is the person whose X is V1 and whose Y is V2?'"""
         templates = generate_templates(depth=6, question_types=[QUESTION_TYPE_MULTI_CONSTRAINT])
         mc2 = [t for t in templates if t[3] == MULTI_CONSTRAINT_2_SUBTYPE]
@@ -289,6 +317,12 @@ class TestMultiConstraint:
             answer = _get_extended_cfg_answer(question, query, answer_info, subtype, db)
             assert isinstance(answer, list)
             assert len(answer) > 0
+            if question_collector is not None:
+                question_collector.add(
+                    test_name="multi_constraint_2_attrs",
+                    question=question, query=query, answer=answer,
+                    subtype=subtype, template=mc2[0][0],
+                )
 
     def test_multi_constraint_3_attrs(self, db, person_names, caches):
         """3-attribute: 'Who is the person whose X is V1 and whose Y is V2 and whose Z is V3?'"""
@@ -313,7 +347,7 @@ class TestMultiConstraint:
         # The person variable should appear in both
         assert set(vars_in_q0) & set(vars_in_q1)
 
-    def test_multi_constraint_answer_matches_all(self, db, person_names, caches):
+    def test_multi_constraint_answer_matches_all(self, db, person_names, caches, question_collector):
         """Answer person must satisfy ALL constraints."""
         templates = generate_templates(depth=6, question_types=[QUESTION_TYPE_MULTI_CONSTRAINT])
         mc2 = [t for t in templates if t[3] == MULTI_CONSTRAINT_2_SUBTYPE]
@@ -337,6 +371,12 @@ class TestMultiConstraint:
                     check = stmt.replace(answer_info, f'"{person}"')
                     results = list(db.prolog.query(check))
                     assert len(results) > 0, f"{person} should satisfy: {check}"
+            if question_collector is not None:
+                question_collector.add(
+                    test_name="multi_constraint_answer_matches_all",
+                    question=question, query=query, answer=answer,
+                    subtype=subtype, template=mc2[0][0],
+                )
             return
 
 
@@ -344,7 +384,7 @@ class TestMultiConstraint:
 # Superlative tests
 # ---------------------------------------------------------------------------
 class TestSuperlative:
-    def test_superlative_oldest_depth_2(self, db, person_names, caches):
+    def test_superlative_oldest_depth_2(self, db, person_names, caches, question_collector):
         """'Who is the oldest <relation> of <name>?'"""
         templates = generate_templates(depth=5, question_types=[QUESTION_TYPE_SUPERLATIVE])
         oldest = [t for t in templates if t[3] == SUPERLATIVE_OLDEST_SUBTYPE]
@@ -363,6 +403,12 @@ class TestSuperlative:
             assert isinstance(answer, list)
             if answer:
                 assert answer[0] in person_names
+            if question_collector is not None:
+                question_collector.add(
+                    test_name="superlative_oldest_depth_2",
+                    question=question, query=query, answer=answer,
+                    subtype=subtype, template=tmpl[0],
+                )
             return
 
     def test_superlative_youngest_depth_3(self, db, person_names, caches):
@@ -401,7 +447,7 @@ class TestSuperlative:
             has_negation = any("\\+" in stmt for stmt in query)
             assert has_negation, f"Superlative query should have \\+: {query}"
 
-    def test_superlative_oldest_answer_is_oldest(self, db, person_names, caches):
+    def test_superlative_oldest_answer_is_oldest(self, db, person_names, caches, question_collector):
         """The oldest answer should have the earliest DOB among the candidates."""
         templates = generate_templates(depth=5, question_types=[QUESTION_TYPE_SUPERLATIVE])
         oldest = [t for t in templates if t[3] == SUPERLATIVE_OLDEST_SUBTYPE]
@@ -422,9 +468,15 @@ class TestSuperlative:
             for person in answer:
                 dob_results = list(db.prolog.query(f'dob("{person}", D)'))
                 assert len(dob_results) > 0, f"{person} should have a DOB"
+            if question_collector is not None:
+                question_collector.add(
+                    test_name="superlative_oldest_answer_is_oldest",
+                    question=question, query=query, answer=answer,
+                    subtype=subtype, template=tmpl[0],
+                )
             return
 
-    def test_superlative_single_candidate(self, db, person_names, caches):
+    def test_superlative_single_candidate(self, db, person_names, caches, question_collector):
         """If only one candidate exists, superlative should return that person."""
         # This is implicitly tested — if a person has only one child,
         # "oldest child" returns that child
@@ -439,6 +491,12 @@ class TestSuperlative:
                 _, _, answer_var, subtype = tmpl
                 answer = _get_extended_cfg_answer(question, query, answer_var, subtype, db)
                 assert isinstance(answer, list)
+                if question_collector is not None:
+                    question_collector.add(
+                        test_name="superlative_single_candidate",
+                        question=question, query=query, answer=answer,
+                        subtype=subtype, template=tmpl[0],
+                    )
                 return
 
 
@@ -446,7 +504,7 @@ class TestSuperlative:
 # Cross-type composition tests
 # ---------------------------------------------------------------------------
 class TestCrossTypeComposition:
-    def test_comparison_with_deep_chains(self, db, person_names, caches):
+    def test_comparison_with_deep_chains(self, db, person_names, caches, question_collector):
         """Comparison where both operands are multi-hop chains."""
         templates = generate_templates(depth=6, question_types=[QUESTION_TYPE_COMPARISON])
         age_templates = [t for t in templates if t[3] == COMPARISON_AGE_SUBTYPE]
@@ -468,9 +526,15 @@ class TestCrossTypeComposition:
                             question, query, answer_info, subtype, db
                         )
                         assert isinstance(answer, list)
+                        if question_collector is not None:
+                            question_collector.add(
+                                test_name="comparison_with_deep_chains",
+                                question=question, query=query, answer=answer,
+                                subtype=subtype, template=tmpl[0],
+                            )
                         return
 
-    def test_superlative_with_chain(self, db, person_names, caches):
+    def test_superlative_with_chain(self, db, person_names, caches, question_collector):
         """Superlative where R_c is a multi-hop chain, not just a name."""
         templates = generate_templates(depth=6, question_types=[QUESTION_TYPE_SUPERLATIVE])
         oldest = [t for t in templates if t[3] == SUPERLATIVE_OLDEST_SUBTYPE]
@@ -483,6 +547,12 @@ class TestCrossTypeComposition:
                 if result is not None:
                     question, query = result
                     assert "of the" in question or "whose" in question
+                    if question_collector is not None:
+                        question_collector.add(
+                            test_name="superlative_with_chain",
+                            question=question, query=query,
+                            subtype=tmpl[3], template=tmpl[0],
+                        )
                     return
 
 
@@ -490,7 +560,7 @@ class TestCrossTypeComposition:
 # Question parsing tests
 # ---------------------------------------------------------------------------
 class TestQuestionParsing:
-    def test_generated_questions_well_formed(self, db, person_names, caches):
+    def test_generated_questions_well_formed(self, db, person_names, caches, question_collector):
         """All generated questions end with '?' and have no template placeholders."""
         templates = generate_templates(depth=5, question_types=ALL_QUESTION_TYPES)
         rng = np.random.default_rng(42)
@@ -514,8 +584,15 @@ class TestQuestionParsing:
                 assert not re.search(
                     r"<\w+>_\d+", stmt
                 ), f"Query has unresolved placeholder: {stmt}"
+            if question_collector is not None:
+                subtype = tmpl[3] if len(tmpl) == 4 else "base"
+                question_collector.add(
+                    test_name="well_formed_questions",
+                    question=question, query=query,
+                    subtype=subtype, template=tmpl[0],
+                )
 
-    def test_prolog_queries_execute_without_error(self, db, person_names, caches):
+    def test_prolog_queries_execute_without_error(self, db, person_names, caches, question_collector):
         """All generated Prolog queries should execute without errors."""
         templates = generate_templates(depth=5, question_types=ALL_QUESTION_TYPES)
         rng = np.random.default_rng(42)
@@ -534,9 +611,16 @@ class TestQuestionParsing:
             question, query = result
             joined = ", ".join(reversed(query))
             try:
-                list(db.prolog.query(joined))
+                results = list(db.prolog.query(joined))
             except Exception as e:
                 pytest.fail(f"Prolog query failed: {joined}\nError: {e}")
+            if question_collector is not None:
+                subtype = tmpl[3] if len(tmpl) == 4 else "base"
+                question_collector.add(
+                    test_name="prolog_queries_execute",
+                    question=question, query=query,
+                    subtype=subtype, template=tmpl[0],
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +712,7 @@ class TestBalancedSampling:
 # Difficulty calculation tests
 # ---------------------------------------------------------------------------
 class TestDifficulty:
-    def test_extended_question_difficulty(self, db, person_names, caches):
+    def test_extended_question_difficulty(self, db, person_names, caches, question_collector):
         """Extended questions should have non-zero difficulty."""
         templates = generate_templates(depth=5, question_types=ALL_QUESTION_TYPES)
         rng = np.random.default_rng(42)
@@ -637,6 +721,13 @@ class TestDifficulty:
             if len(tmpl) == 4:
                 result = _sample_extended(tmpl, rng, db, person_names, caches)
                 if result is not None:
-                    _, query = result
+                    question, query = result
                     difficulty = calculate_query_difficulty(query)
                     assert difficulty >= 0
+                    if question_collector is not None:
+                        question_collector.add(
+                            test_name="difficulty",
+                            question=question, query=query,
+                            answer=f"difficulty={difficulty}",
+                            subtype=tmpl[3], template=tmpl[0],
+                        )

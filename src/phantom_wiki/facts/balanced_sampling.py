@@ -32,10 +32,18 @@ DIFFICULTY_BUCKETS = {
 }
 
 
-def get_difficulty_bucket(difficulty: int) -> str:
+def _extract_composite(difficulty) -> int:
+    """Extract the scalar composite from a difficulty field (int or dict)."""
+    if isinstance(difficulty, dict):
+        return difficulty.get("composite", 0)
+    return difficulty
+
+
+def get_difficulty_bucket(difficulty) -> str:
     """Map a difficulty score to a bucket name."""
+    composite = _extract_composite(difficulty)
     for bucket_name, (low, high) in DIFFICULTY_BUCKETS.items():
-        if low <= difficulty <= high:
+        if low <= composite <= high:
             return bucket_name
     return "extreme"  # fallback
 
@@ -168,19 +176,19 @@ def filter_by_difficulty(
     min_difficulty: int | None = None,
     max_difficulty: int | None = None,
 ) -> list[dict]:
-    """Filter questions by difficulty range.
+    """Filter questions by difficulty range (uses composite score).
 
     Args:
-        questions: List of question dicts with 'difficulty' field.
-        min_difficulty: Minimum difficulty (inclusive). None = no minimum.
-        max_difficulty: Maximum difficulty (inclusive). None = no maximum.
+        questions: List of question dicts with 'difficulty' field (int or dict).
+        min_difficulty: Minimum composite difficulty (inclusive). None = no minimum.
+        max_difficulty: Maximum composite difficulty (inclusive). None = no maximum.
 
     Returns:
         Filtered list of questions.
     """
     filtered = []
     for q in questions:
-        d = q["difficulty"]
+        d = _extract_composite(q["difficulty"])
         if min_difficulty is not None and d < min_difficulty:
             continue
         if max_difficulty is not None and d > max_difficulty:
@@ -273,7 +281,7 @@ def sample_questions(
     # Build filtered pool
     pool: list[dict] = []
     for q in questions:
-        d = q["difficulty"]
+        d = _extract_composite(q["difficulty"])
 
         # Step range filter
         if not _matches_step_range(d, min_steps, max_steps):
@@ -303,9 +311,9 @@ def sample_questions(
     indices = rng.choice(len(pool), size=count, replace=False)
     sampled = [pool[int(i)] for i in indices]
 
-    # Annotate with reasoning_steps alias
+    # Annotate with reasoning_steps alias (composite for backwards compat)
     for q in sampled:
-        q["reasoning_steps"] = q["difficulty"]
+        q["reasoning_steps"] = _extract_composite(q["difficulty"])
 
     logger.info(
         f"Sampled {count} questions (pool size {len(pool)}, "
@@ -337,7 +345,7 @@ def describe_pool(questions: list[dict]) -> dict:
     by_both: dict[str, dict[str, int]] = {level: defaultdict(int) for level in DIFFICULTY_LEVELS}
 
     for q in questions:
-        d = q["difficulty"]
+        d = _extract_composite(q["difficulty"])
         cat = q.get("question_category", "")
 
         # Determine difficulty level

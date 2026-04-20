@@ -38,15 +38,16 @@ from ..facts.friends.constants import (
     FRIENDSHIP_RELATION,
 )
 from ..utils import decode
-from .constants.article_templates import BASIC_ARTICLE_TEMPLATE
+from .constants.article_templates import BASIC_ARTICLE_TEMPLATE, TEMPORAL_ARTICLE_TEMPLATE
 
 
-def get_articles(db: Database, names: list[str]) -> dict:
+def get_articles(db: Database, names: list[str], include_temporal: bool = False) -> dict:
     """Construct articles for a list of names.
 
     Args:
         db: Database object
         names: list of names
+        include_temporal: if True, include temporal life events section
     Returns:
         dict of articles for each name
     """
@@ -62,15 +63,34 @@ def get_articles(db: Database, names: list[str]) -> dict:
         db, names, ATTRIBUTE_TYPES + ["gender"], ATTRIBUTE_FACT_TEMPLATES
     )
 
+    temporal_sentences = defaultdict(list)
+    temporal_facts_map = defaultdict(list)
+    if include_temporal:
+        temporal_sentences, temporal_facts_map = get_temporal_sentences(db, names)
+
     articles = {}
     for name in names:
-        article = BASIC_ARTICLE_TEMPLATE.format(
-            name=name,
-            family_facts="\n".join(family_sentences[name]),
-            friend_facts="\n".join(friend_sentences[name]),
-            attribute_facts="\n".join(attribute_sentences[name]),
+        if include_temporal and temporal_sentences[name]:
+            article = TEMPORAL_ARTICLE_TEMPLATE.format(
+                name=name,
+                family_facts="\n".join(family_sentences[name]),
+                friend_facts="\n".join(friend_sentences[name]),
+                attribute_facts="\n".join(attribute_sentences[name]),
+                temporal_facts="\n".join(temporal_sentences[name]),
+            )
+        else:
+            article = BASIC_ARTICLE_TEMPLATE.format(
+                name=name,
+                family_facts="\n".join(family_sentences[name]),
+                friend_facts="\n".join(friend_sentences[name]),
+                attribute_facts="\n".join(attribute_sentences[name]),
+            )
+        facts = (
+            family_facts[name]
+            + friend_facts[name]
+            + attribute_facts[name]
+            + temporal_facts_map[name]
         )
-        facts = family_facts[name] + friend_facts[name] + attribute_facts[name]
         articles[name] = (article, facts)
     return articles
 
@@ -159,4 +179,81 @@ def get_attributes(
             sent = attr_template.replace("<subject>", name) + " " + ", ".join(target) + "."
             # Append the sentence to the list of sentences for the person
             sents[name].append(sent)
+    return sents, facts
+
+
+#
+# Functionality to get temporal event sentences
+#
+def get_temporal_sentences(
+    db: Database,
+    names: list[str],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Get temporal event sentences for a list of names.
+
+    Args:
+        db: Database object
+        names: list of names
+    Returns:
+        tuple of (sentences dict, facts dict) for each name
+    """
+    from ..facts.temporal.constants import TEMPORAL_FACT_TEMPLATES
+
+    sents = defaultdict(list)
+    facts = defaultdict(list)
+
+    for name in names:
+        # Education events
+        for r in db.query(f'education("{name}", School, Year)'):
+            school = decode(r["School"])
+            year = int(r["Year"])
+            sent = TEMPORAL_FACT_TEMPLATES["education"].format(name=name, school=school, year=year)
+            sents[name].append(sent)
+            facts[name].append(f'education("{name}", "{school}", {year}).')
+
+        # Career events (sorted by start year)
+        career_results = list(db.query(f'career("{name}", Job, Company, Start, End)'))
+        career_results.sort(key=lambda r: int(r["Start"]))
+        for r in career_results:
+            job = decode(r["Job"])
+            company = decode(r["Company"])
+            start = int(r["Start"])
+            end = int(r["End"])
+            if end == 9999:
+                sent = TEMPORAL_FACT_TEMPLATES["career_current"].format(
+                    name=name, job=job, company=company, start_year=start
+                )
+            else:
+                sent = TEMPORAL_FACT_TEMPLATES["career"].format(
+                    name=name, job=job, company=company, start_year=start, end_year=end
+                )
+            sents[name].append(sent)
+            facts[name].append(f'career("{name}", "{job}", "{company}", {start}, {end}).')
+
+        # Marriage year events
+        for r in db.query(f'marriage_year("{name}", Spouse, Year)'):
+            spouse = decode(r["Spouse"])
+            year = int(r["Year"])
+            sent = TEMPORAL_FACT_TEMPLATES["marriage_year"].format(name=name, spouse=spouse, year=year)
+            sents[name].append(sent)
+            facts[name].append(f'marriage_year("{name}", "{spouse}", {year}).')
+
+        # Lived-in events (sorted by start year)
+        lived_results = list(db.query(f'lived_in("{name}", City, Start, End)'))
+        lived_results.sort(key=lambda r: int(r["Start"]))
+        for r in lived_results:
+            city = decode(r["City"])
+            start = int(r["Start"])
+            end = int(r["End"])
+            if end == 9999:
+                sent = TEMPORAL_FACT_TEMPLATES["lived_in_current"].format(
+                    name=name, city=city, start_year=start
+                )
+            else:
+                sent = TEMPORAL_FACT_TEMPLATES["lived_in"].format(
+                    name=name, city=city, start_year=start, end_year=end
+                )
+            sents[name].append(sent)
+            facts[name].append(f'lived_in("{name}", "{city}", {start}, {end}).')
+
     return sents, facts

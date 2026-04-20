@@ -21,8 +21,11 @@ from .facts.extended_questions import (
 )
 from .facts.family import db_generate_family
 from .facts.friends import db_generate_friendships
+from .facts.difficulty import compute_difficulty
 from .facts.question_difficulty import calculate_query_difficulty
-from .facts.sample import sample_question
+from .facts.bidirectional_sample import sample_question_bidirectional
+from .facts.inverse_relations import register_inverse_predicates
+from .facts.sample import RELATION, prewarm_inverse_cache, sample_question
 from .facts.templates import (
     ALL_QUESTION_TYPES,
     COMPARISON_AGE_SUBTYPE,
@@ -37,6 +40,15 @@ from .facts.templates import (
 )
 from .utils import blue, generate_unique_id
 from .utils.get_answer import get_answer
+
+
+def _build_difficulty_fields(query: list[str]) -> dict:
+    """Build both the structured difficulty dict and the legacy scalar."""
+    structured = compute_difficulty(query)
+    return {
+        "reasoning_steps": structured["hops"],
+        "difficulty": structured,
+    }
 
 
 def _get_extended_cfg_answer(
@@ -122,20 +134,39 @@ def _get_extended_cfg_answer(
         return sorted({str(decode(r[answer_info])) for r in results if answer_info in r})
 
 
-def _filter_by_hops(questions: list[dict], min_hops: int = None, max_hops: int = None) -> list[dict]:
-    """Filter questions by hop count (number of Prolog predicates in the query)."""
+def _filter_by_constraints(questions: list[dict], min_constraints: int = None, max_constraints: int = None) -> list[dict]:
+    """Filter questions by constraint count from the structured difficulty field."""
     filtered = []
     for q in questions:
-        prolog_query = q.get("prolog", {}).get("query", [])
-        if isinstance(prolog_query, list):
-            # Count hops as number of chain predicates (exclude static predicates)
-            hops = sum(
-                1
-                for stmt in prolog_query
-                if not stmt.strip().startswith("\\+") and "dob(" not in stmt and "@<" not in stmt and "@>" not in stmt
-            )
+        diff = q.get("difficulty", {})
+        constraints = diff.get("constraints", 0) if isinstance(diff, dict) else 0
+        if min_constraints is not None and constraints < min_constraints:
+            continue
+        if max_constraints is not None and constraints > max_constraints:
+            continue
+        filtered.append(q)
+    return filtered
+
+
+def _filter_by_level(questions: list[dict], level: str) -> list[dict]:
+    """Filter questions by structured difficulty level."""
+    filtered = []
+    for q in questions:
+        diff = q.get("difficulty", {})
+        if isinstance(diff, dict) and diff.get("level") == level:
+            filtered.append(q)
+    return filtered
+
+
+def _filter_by_hops(questions: list[dict], min_hops: int = None, max_hops: int = None) -> list[dict]:
+    """Filter questions by hop count from the structured difficulty field."""
+    filtered = []
+    for q in questions:
+        diff = q.get("difficulty", {})
+        if isinstance(diff, dict):
+            hops = diff.get("hops", 0)
         else:
-            hops = 1
+            hops = diff
         if min_hops is not None and hops < min_hops:
             continue
         if max_hops is not None and hops > max_hops:
@@ -172,12 +203,18 @@ def generate_dataset(
     question_types: str = None,
     min_hops: int = None,
     max_hops: int = None,
+    min_constraints: int = None,
+    max_constraints: int = None,
+    sample_difficulty_level: str = None,
     sample_count: int = None,
     sample_difficulty: str = None,
     sample_min_steps: int = None,
     sample_max_steps: int = None,
     sample_types: str = None,
     describe_pool: bool = False,
+    sampling_method: str = "backward",
+    anchor_strategy: str = "random",
+    answer_position: str = "head",
 ) -> None:
     """
     Generate a PhantomWiki dataset consisting of family trees, friendship networks,
@@ -276,6 +313,12 @@ def generate_dataset(
 
     timings["facts_generate"] = time.time() - start
 
+    # Register inverse predicates for bidirectional sampling
+    inverse_map = None
+    if sampling_method == "bidirectional":
+        blue("Registering inverse predicates for bidirectional sampling")
+        inverse_map = register_inverse_predicates(db)
+
     db_path = os.path.join(output_dir, "facts.pl")
     blue(f"Saving Prolog database to {db_path}")
     facts_time = time.time()
@@ -358,10 +401,19 @@ def generate_dataset(
     # e.g. "John" -> [("child", "Alice"), ("child", "Bob"), ("friend", "Charlie"), ...]
     # NOTE: Invariant: (relation, related person) pairs are unique
     person_name2relation_and_related: dict[str, list[tuple[str, str]]] = {}
+    # Inverse relation cache for bidirectional sampling: R(A, "key") lookups
+    person_name2inverse_relation: dict[str, list[tuple[str, str]]] = {}
+    if sampling_method == "bidirectional":
+        prewarm_inverse_cache(person_name2inverse_relation, db, RELATION)
 
     # To store all the questions and queries for all templates
     all_questions = []
     all_queries = []
+    # Sampling metadata per template (only populated for bidirectional)
+    all_sampling_metadata: list[list[dict | None]] = []
+
+    # Balanced counter for bidirectional anchor strategy
+    balanced_counter = [0]
 
     for i, (question_template, query_template, answer) in progbar:
         # Reset the seed at the start of each question type
@@ -371,6 +423,7 @@ def generate_dataset(
         # To store the questions and queries for the given template
         questions = []
         queries = []
+        metadata_list = []
 
         # for _ in range(args.num_questions_per_type):
         while (
@@ -379,24 +432,64 @@ def generate_dataset(
             # TODO: handle potential edge cases where templates repeatedly fail to generate,
             # resulting in an infinite loop
         ):  # TODO: temporary fix to make sure that we generate the same number of questions for each template
-            # sample a question
-            question, query = sample_question(
-                question_template,
-                query_template,
-                rng,
-                db,
-                person_name_bank,
-                person_name2attr_name_and_val,
-                person_name2relation_and_related,
-                easy_mode=easy_mode,
-                num_sampling_attempts=num_sampling_attempts,
-            )
-
-            questions.append(question)
-            queries.append(query)
+            if sampling_method == "bidirectional" and inverse_map is not None:
+                result = sample_question_bidirectional(
+                    question_template,
+                    query_template,
+                    rng,
+                    db,
+                    person_name_bank,
+                    person_name2attr_name_and_val,
+                    person_name2relation_and_related,
+                    person_name2inverse_relation,
+                    inverse_map,
+                    easy_mode=easy_mode,
+                    num_sampling_attempts=num_sampling_attempts,
+                    anchor_strategy=anchor_strategy,
+                    answer_position=answer_position,
+                    _balanced_counter=balanced_counter,
+                )
+                if result is not None:
+                    question, query, metadata = result
+                    questions.append(question)
+                    queries.append(query)
+                    metadata_list.append(metadata)
+                else:
+                    # Bidirectional failed — fall back to backward sampling
+                    question, query = sample_question(
+                        question_template,
+                        query_template,
+                        rng,
+                        db,
+                        person_name_bank,
+                        person_name2attr_name_and_val,
+                        person_name2relation_and_related,
+                        easy_mode=easy_mode,
+                        num_sampling_attempts=num_sampling_attempts,
+                    )
+                    questions.append(question)
+                    queries.append(query)
+                    metadata_list.append({"method": "backward_fallback"})
+            else:
+                # Default backward sampling
+                question, query = sample_question(
+                    question_template,
+                    query_template,
+                    rng,
+                    db,
+                    person_name_bank,
+                    person_name2attr_name_and_val,
+                    person_name2relation_and_related,
+                    easy_mode=easy_mode,
+                    num_sampling_attempts=num_sampling_attempts,
+                )
+                questions.append(question)
+                queries.append(query)
+                metadata_list.append(None)
 
         all_questions.append(questions)
         all_queries.append(queries)
+        all_sampling_metadata.append(metadata_list)
 
     # Generate extended CFG-based question types (comparison, multi-constraint, superlative)
     extended_cfg_questions_data = []
@@ -436,7 +529,7 @@ def generate_dataset(
                 answer_list = _get_extended_cfg_answer(
                     questions[j], queries[j], answer_info, question_subtype, db
                 )
-                question_difficulty = calculate_query_difficulty(queries[j])
+                diff = _build_difficulty_fields(queries[j])
                 q_type = classify_question_type(question_template)
                 extended_cfg_questions_data.append(
                     {
@@ -447,7 +540,8 @@ def generate_dataset(
                         "prolog": {"query": queries[j], "answer": str(answer_info)},
                         "template": question_template,
                         "type": len(base_templates) + tmpl_idx,
-                        "difficulty": question_difficulty,
+                        "reasoning_steps": diff["reasoning_steps"],
+                        "difficulty": diff["difficulty"],
                         "is_aggregation_question": False,
                         "question_category": question_subtype,
                     }
@@ -484,7 +578,7 @@ def generate_dataset(
             # Get answers for extended questions
             for j in range(len(questions)):
                 answer_list = get_extended_answer(questions[j], queries[j], qtype, db)
-                question_difficulty = calculate_query_difficulty(queries[j])
+                diff = _build_difficulty_fields(queries[j])
                 extended_questions_data.append(
                     {
                         "id": generate_unique_id(),
@@ -494,7 +588,8 @@ def generate_dataset(
                         "prolog": {"query": queries[j], "answer": "X"},
                         "template": [qtype],
                         "type": len(base_templates) + len(extended_cfg_templates) + EXTENDED_QUESTION_TYPES.index(qtype),
-                        "difficulty": question_difficulty,
+                        "reasoning_steps": diff["reasoning_steps"],
+                        "difficulty": diff["difficulty"],
                         "is_aggregation_question": False,
                         "question_category": qtype,
                     }
@@ -517,26 +612,29 @@ def generate_dataset(
         questions = []
 
         for j in range(num_questions_per_type):
-            # get the difficulty of the question
             question = all_questions[i][j]
             query = all_queries[i][j]
-            question_difficulty = calculate_query_difficulty(query)
+            diff = _build_difficulty_fields(query)
 
-            questions.append(
-                {
-                    "id": generate_unique_id(),
-                    "question": question,
-                    "solution_traces": json.dumps(
-                        all_solution_traces[i][j]
-                    ),  # NOTE: serialize list of dicts so that it can be saved on HF
-                    "answer": all_final_results[i][j],
-                    "prolog": {"query": query, "answer": answer},
-                    "template": question_template,
-                    "type": i,  # this references the template type
-                    "difficulty": question_difficulty,
-                    "is_aggregation_question": is_aggregation_question(question),
-                }
-            )
+            q_dict = {
+                "id": generate_unique_id(),
+                "question": question,
+                "solution_traces": json.dumps(
+                    all_solution_traces[i][j]
+                ),  # NOTE: serialize list of dicts so that it can be saved on HF
+                "answer": all_final_results[i][j],
+                "prolog": {"query": query, "answer": answer},
+                "template": question_template,
+                "type": i,  # this references the template type
+                "reasoning_steps": diff["reasoning_steps"],
+                "difficulty": diff["difficulty"],
+                "is_aggregation_question": is_aggregation_question(question),
+            }
+            # Add sampling metadata for bidirectional sampling
+            sm = all_sampling_metadata[i][j] if i < len(all_sampling_metadata) else None
+            if sm is not None:
+                q_dict["sampling_metadata"] = sm
+            questions.append(q_dict)
             if question_format == "json_by_type":
                 with open(os.path.join(question_dir, f"type{i}.json"), "w") as file:
                     json.dump(questions, file, indent=4)
@@ -564,6 +662,18 @@ def generate_dataset(
         blue("Filtering questions by hop count")
         all_full_questions = _filter_by_hops(all_full_questions, min_hops, max_hops)
         logging.info(f"After hop filtering: {len(all_full_questions)} questions")
+
+    # Apply constraint filtering
+    if min_constraints is not None or max_constraints is not None:
+        blue("Filtering questions by constraint count")
+        all_full_questions = _filter_by_constraints(all_full_questions, min_constraints, max_constraints)
+        logging.info(f"After constraint filtering: {len(all_full_questions)} questions")
+
+    # Apply difficulty-level filtering
+    if sample_difficulty_level is not None:
+        blue(f"Filtering questions by difficulty level: {sample_difficulty_level}")
+        all_full_questions = _filter_by_level(all_full_questions, sample_difficulty_level)
+        logging.info(f"After level filtering: {len(all_full_questions)} questions")
 
     # Apply difficulty-based filtering and balanced sampling
     if min_difficulty is not None or max_difficulty is not None:
@@ -620,11 +730,24 @@ def generate_dataset(
     blue("Saving questions")
     start = time.time()
     if question_format == "json":
-        # save all questions to a single file
         save_path = os.path.join(output_dir, "questions.json")
         logging.info(f"Saving questions to: {save_path}")
         with open(save_path, "w") as file:
             json.dump(all_full_questions, file, indent=4)
+    elif question_format == "json_by_type":
+        # Re-write type files after filtering/sampling
+        by_type: dict[int, list[dict]] = {}
+        for q in all_full_questions:
+            by_type.setdefault(q["type"], []).append(q)
+        for type_id, type_qs in by_type.items():
+            with open(os.path.join(question_dir, f"type{type_id}.json"), "w") as file:
+                json.dump(type_qs, file, indent=4)
+        # Remove type files that no longer have questions after filtering
+        for fname in os.listdir(question_dir):
+            if fname.startswith("type") and fname.endswith(".json"):
+                type_id = int(fname[4:-5])
+                if type_id not in by_type:
+                    os.remove(os.path.join(question_dir, fname))
     timings["questions_save"] = time.time() - start
 
     timings["total"] = time.time() - global_start

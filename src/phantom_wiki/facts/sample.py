@@ -84,6 +84,64 @@ def get_vals_and_update_cache(
         return query_and_answer
 
 
+def get_inverse_vals_and_update_cache(
+    cache: dict[str, list[tuple[str, str]]],
+    key: str,
+    db: Database,
+    query_bank: list[str],
+    inverse_map: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """
+    Returns the values for a key from the cache if it exists.
+    Otherwise finds entities X where ``relation(X, key)`` holds.
+
+    When ``inverse_map`` is provided, uses registered inverse predicates
+    (``relation_inverse("key", A)``) so SWI-Prolog can use first-argument
+    indexing — much faster than ``relation(A, "key")``.
+
+    Args:
+        cache: a dictionary mapping keys to lists of values
+        key: the key to query the cache with (placed in second arg position)
+        db: the Prolog database to query
+        query_bank: a list of Prolog queries to query the database with
+        inverse_map: optional mapping from relation to its inverse predicate name
+
+    Returns:
+        List of ``(query, value of A)`` pairs where A is in the first argument position
+    """
+    if key in cache:
+        return cache[key]
+    else:
+        query_and_answer = []
+        for query in query_bank:
+            if inverse_map and query in inverse_map:
+                inv_name = inverse_map[query]
+                r: list[dict] = db.query(f'{inv_name}("{key}", A)')
+            else:
+                r: list[dict] = db.query(f'{query}(A, "{key}")')
+            query_and_answer.extend((query, decode(result["A"])) for result in r)
+        cache[key] = query_and_answer
+        return query_and_answer
+
+
+def prewarm_inverse_cache(
+    cache: dict[str, list[tuple[str, str]]],
+    db: Database,
+    query_bank: list[str],
+) -> None:
+    """Bulk-populate the inverse relation cache for all people at once.
+
+    Queries each relation R(X, Y) once with both args unbound and builds the
+    inverse mapping Y -> [(R, X), ...].  This is O(total_facts) total — far
+    faster than per-person queries which are O(N * R) with unindexed scans.
+    """
+    for query in query_bank:
+        results = db.query(f"{query}(X, Y)")
+        for r in results:
+            x, y = decode(r["X"]), decode(r["Y"])
+            cache.setdefault(y, []).append((query, x))
+
+
 def add_to_atom_assignments(atom_assignments: dict[str, str], new_atom_val: str) -> str:
     """
     Adds a new atom variable to the atom_assignments dictionary with `new_atom_val` value.
@@ -104,6 +162,7 @@ def process__attr_name__Y__attr_val(
     db: Database,
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
+    used_attrs_per_person: dict[str, set[tuple[str, str]]] = None,
 ) -> bool:
     r"""
     Processes <attribute_name>_(\d+)(Y_\d+, <attribute_value>_\d+) ---
@@ -146,11 +205,26 @@ def process__attr_name__Y__attr_val(
         # If there are no attributes for this person, dead end in the graph traversal. Break and try again
         return False
 
-    # c. Randomly choose an attribute name and value
+    # c. Filter out attribute (name, value) pairs already used for this person variable,
+    #    so multi-constraint questions use distinct attributes.
+    if used_attrs_per_person is not None:
+        used = used_attrs_per_person.get(y_placeholder, set())
+        available = [(n, v) for n, v in attr_name_and_vals if (n, v) not in used]
+        if len(available) == 0:
+            return False
+        attr_name_and_vals = available
+
+    # d. Randomly choose an attribute name and value
     attribute_name_choice, attribute_value_choice = rng.choice(attr_name_and_vals)
     query_assignments[attribute_name] = attribute_name_choice
     # Realized values, in this case <attribute_value>, should be in quotes when creating the Prolog query
     query_assignments[attribute_value] = f'"{attribute_value_choice}"'
+
+    # Track this assignment so subsequent constraints on the same person pick different attributes
+    if used_attrs_per_person is not None:
+        used_attrs_per_person.setdefault(y_placeholder, set()).add(
+            (attribute_name_choice, attribute_value_choice)
+        )
 
     # Add the attribute name and value to the question assignments, could be an alias
     question_assignments[attribute_name] = ATTRIBUTE_ALIASES[attribute_name_choice]
@@ -500,6 +574,7 @@ def sample_question(
         atom_assignments = {}
         query_assignments = {}
         question_assignments = {}
+        used_attrs_per_person: dict[str, set[tuple[str, str]]] = {}
 
         # Possible queries in query template list:
         # 1. <attribute_name>_(\d+)(Y_\d+, <attribute_value>_\d+)
@@ -536,6 +611,7 @@ def sample_question(
                     db,
                     person_name_bank,
                     person_name2attr_name_and_val,
+                    used_attrs_per_person,
                 )
                 if not is_success:
                     break
