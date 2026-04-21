@@ -36,9 +36,9 @@
         "type": 15,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 1,
-            "composite": 4,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -81,9 +81,9 @@
         "type": 15,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 1,
-            "composite": 4,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -126,9 +126,9 @@
         "type": 15,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 1,
-            "composite": 4,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -171,10 +171,10 @@
         "type": 15,
         "reasoning_steps": 2,
         "difficulty": {
-            "hops": 2,
+            "hops": 1,
             "constraints": 1,
-            "composite": 3,
-            "level": "easy"
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -216,10 +216,10 @@
         "type": 15,
         "reasoning_steps": 4,
         "difficulty": {
-            "hops": 4,
+            "hops": 3,
             "constraints": 1,
-            "composite": 5,
-            "level": "medium"
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -261,10 +261,10 @@
         "type": 15,
         "reasoning_steps": 6,
         "difficulty": {
-            "hops": 6,
+            "hops": 3,
             "constraints": 1,
-            "composite": 7,
-            "level": "medium"
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -306,9 +306,9 @@
         "type": 15,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 1,
-            "composite": 4,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -351,9 +351,9 @@
         "type": 15,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 1,
-            "composite": 4,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -396,10 +396,10 @@
         "type": 15,
         "reasoning_steps": 6,
         "difficulty": {
-            "hops": 6,
+            "hops": 3,
             "constraints": 1,
-            "composite": 7,
-            "level": "medium"
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -441,10 +441,10 @@
         "type": 15,
         "reasoning_steps": 5,
         "difficulty": {
-            "hops": 5,
+            "hops": 3,
             "constraints": 1,
-            "composite": 6,
-            "level": "medium"
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"

@@ -6,7 +6,6 @@ in the relation chain, then walking outward in both directions:
 - Toward the tail (start): inverse queries R(A, "known")
 """
 
-import itertools
 import re
 from copy import copy
 
@@ -670,7 +669,6 @@ def sample_question_bidirectional(
     anchor_strategy: str = "random",
     answer_position: str = "head",
     _balanced_counter: list[int] | None = None,
-    count_solutions: bool = True,
 ) -> tuple[str, list[str], dict] | None:
     """Sample a question using bidirectional anchor placement.
 
@@ -771,16 +769,6 @@ def sample_question_bidirectional(
         for placeholder, sampled_value in question_assignments.items():
             question = question.replace(placeholder, sampled_value)
 
-        # Count Prolog solutions (capped at 50; skippable for benchmarks)
-        prolog_solutions_found = -1
-        if count_solutions:
-            joined_for_count = ", ".join(reversed(query))
-            try:
-                capped = list(itertools.islice(db.query(joined_for_count), 50))
-                prolog_solutions_found = len(capped)
-            except Exception:
-                pass
-
         # Determine answer position
         actual_answer_position = answer_position
         if answer_position == "random":
@@ -814,7 +802,6 @@ def sample_question_bidirectional(
             "polarity": polarity,
             "chain_length": len(chain) - 1,
             "chain_variables": chain,
-            "prolog_solutions_found": prolog_solutions_found,
         }
 
         return question, query, metadata

@@ -622,31 +622,11 @@ class TestMetadata:
                 required = [
                     "method", "anchor_position", "anchor_slot_index",
                     "anchor_person", "answer_position", "answer_slot_index",
-                    "polarity", "chain_length", "prolog_solutions_found",
-                    "chain_variables",
+                    "polarity", "chain_length", "chain_variables",
                 ]
                 for field in required:
                     assert field in metadata, f"Missing: {field}"
                 _collect(question_collector, "metadata_fields", question, query, metadata)
-                return
-        pytest.skip("No result")
-
-    def test_prolog_solutions_found_positive(self, db, person_names, caches, inverse_map,
-                                             base_templates):
-        """prolog_solutions_found >= 1 for valid questions."""
-        attr_cache, rel_cache = caches
-        inv_cache: dict = {}
-        rng = np.random.default_rng(42)
-        for tmpl in base_templates[:15]:
-            q_template, query_template, answer = tmpl
-            result = sample_question_bidirectional(
-                q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
-                num_sampling_attempts=50,
-            )
-            if result is not None:
-                _, _, metadata = result
-                assert metadata["prolog_solutions_found"] >= 1
                 return
         pytest.skip("No result")
 

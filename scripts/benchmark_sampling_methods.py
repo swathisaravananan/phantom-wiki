@@ -86,7 +86,7 @@ def benchmark_bidirectional(templates, db, person_names, attr_cache, rel_cache,
             q_template, query_template, rng, db, person_names,
             attr_cache, rel_cache, inv_cache, inverse_map,
             easy_mode=easy_mode, num_sampling_attempts=100,
-            anchor_strategy="random", count_solutions=False,
+            anchor_strategy="random",
         )
         if result is not None:
             successes += 1

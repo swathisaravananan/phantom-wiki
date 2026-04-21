@@ -37,9 +37,9 @@
         "reasoning_steps": 1,
         "difficulty": {
             "hops": 1,
-            "constraints": 2,
-            "composite": 3,
-            "level": "easy"
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -82,9 +82,9 @@
         "reasoning_steps": 1,
         "difficulty": {
             "hops": 1,
-            "constraints": 2,
-            "composite": 3,
-            "level": "easy"
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -127,9 +127,9 @@
         "reasoning_steps": 1,
         "difficulty": {
             "hops": 1,
-            "constraints": 2,
-            "composite": 3,
-            "level": "easy"
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -172,9 +172,9 @@
         "reasoning_steps": 1,
         "difficulty": {
             "hops": 1,
-            "constraints": 2,
-            "composite": 3,
-            "level": "easy"
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -217,9 +217,9 @@
         "reasoning_steps": 1,
         "difficulty": {
             "hops": 1,
-            "constraints": 2,
-            "composite": 3,
-            "level": "easy"
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -262,9 +262,9 @@
         "reasoning_steps": 3,
         "difficulty": {
             "hops": 3,
-            "constraints": 2,
-            "composite": 5,
-            "level": "medium"
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -307,8 +307,8 @@
         "reasoning_steps": 2,
         "difficulty": {
             "hops": 2,
-            "constraints": 2,
-            "composite": 4,
+            "constraints": 1,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -352,8 +352,8 @@
         "reasoning_steps": 2,
         "difficulty": {
             "hops": 2,
-            "constraints": 2,
-            "composite": 4,
+            "constraints": 1,
+            "composite": 3,
             "level": "easy"
         },
         "is_aggregation_question": false,
@@ -397,9 +397,9 @@
         "reasoning_steps": 3,
         "difficulty": {
             "hops": 3,
-            "constraints": 2,
-            "composite": 5,
-            "level": "medium"
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -442,9 +442,9 @@
         "reasoning_steps": 3,
         "difficulty": {
             "hops": 3,
-            "constraints": 2,
-            "composite": 5,
-            "level": "medium"
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
