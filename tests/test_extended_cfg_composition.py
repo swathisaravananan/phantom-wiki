@@ -66,8 +66,8 @@ def caches(db, person_names):
     attr_cache: dict[str, list[tuple[str, str]]] = {}
     rel_cache: dict[str, list[tuple[str, str]]] = {}
     for name in person_names:
-        get_vals_and_update_cache(attr_cache, name, db, ATTRIBUTE_TYPES)
-        get_vals_and_update_cache(rel_cache, name, db, RELATION)
+        get_vals_and_update_cache(attr_cache, name, db, ATTRIBUTE_TYPES, num_procs=1)
+        get_vals_and_update_cache(rel_cache, name, db, RELATION, num_procs=1)
     return attr_cache, rel_cache
 
 
@@ -87,6 +87,7 @@ def _sample_extended(template, rng, db, person_names, caches, max_attempts=50,
                 person_names,
                 attr_cache,
                 rel_cache,
+                num_procs=1,
                 num_sampling_attempts=1,
             )
             if result is not None:
@@ -572,7 +573,7 @@ class TestQuestionParsing:
                 q_template, query_template, answer = tmpl
                 result = sample_question(
                     q_template, query_template, rng, db, person_names,
-                    caches[0], caches[1], num_sampling_attempts=10,
+                    caches[0], caches[1], num_procs=1, num_sampling_attempts=10,
                 )
             if result is None:
                 continue
@@ -604,7 +605,7 @@ class TestQuestionParsing:
                 q_template, query_template, answer = tmpl
                 result = sample_question(
                     q_template, query_template, rng, db, person_names,
-                    caches[0], caches[1], num_sampling_attempts=10,
+                    caches[0], caches[1], num_procs=1, num_sampling_attempts=10,
                 )
             if result is None:
                 continue

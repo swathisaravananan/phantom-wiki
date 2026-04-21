@@ -55,8 +55,8 @@ def caches(db, person_names):
     from phantom_wiki.facts.sample import RELATION
 
     for name in person_names:
-        get_vals_and_update_cache(attr_cache, name, db, ATTRIBUTE_TYPES)
-        get_vals_and_update_cache(rel_cache, name, db, RELATION)
+        get_vals_and_update_cache(attr_cache, name, db, ATTRIBUTE_TYPES, num_procs=1)
+        get_vals_and_update_cache(rel_cache, name, db, RELATION, num_procs=1)
     return attr_cache, rel_cache
 
 
@@ -158,7 +158,7 @@ class TestMultiConstraint:
     def test_generates_valid_question(self, db, person_names, caches):
         attr_cache, _ = caches
         rng = np.random.default_rng(seed=3)
-        result = sample_multi_constraint_question(rng, db, person_names, attr_cache)
+        result = sample_multi_constraint_question(rng, db, person_names, attr_cache, num_procs=1)
         assert result is not None
         question, query = result
         assert "and whose" in question
@@ -167,7 +167,7 @@ class TestMultiConstraint:
     def test_answer_contains_original_person(self, db, person_names, caches):
         attr_cache, _ = caches
         rng = np.random.default_rng(seed=3)
-        result = sample_multi_constraint_question(rng, db, person_names, attr_cache)
+        result = sample_multi_constraint_question(rng, db, person_names, attr_cache, num_procs=1)
         assert result is not None
         question, query = result
 
@@ -262,7 +262,7 @@ class TestSampleExtended:
         for qtype in basic_types:
             rng = np.random.default_rng(seed=42)
             result = sample_extended_question(
-                qtype, rng, db, person_names, attr_cache, rel_cache
+                qtype, rng, db, person_names, attr_cache, rel_cache, num_procs=1
             )
             assert result is not None, f"Failed to generate question of type {qtype}"
 
@@ -271,5 +271,5 @@ class TestSampleExtended:
         rng = np.random.default_rng(seed=42)
         with pytest.raises(ValueError):
             sample_extended_question(
-                "invalid_type", rng, db, person_names, attr_cache, rel_cache
+                "invalid_type", rng, db, person_names, attr_cache, rel_cache, num_procs=1
             )

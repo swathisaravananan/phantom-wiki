@@ -170,6 +170,7 @@ def sample_multi_constraint_question(
     db: Database,
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
+    num_procs: int,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
     """Sample: 'Who is the person whose <attr_1> is <val_1> and whose <attr_2> is <val_2>?'
@@ -186,6 +187,7 @@ def sample_multi_constraint_question(
             key=person_name,
             db=db,
             query_bank=ATTRIBUTE_TYPES,
+            num_procs=num_procs,
         )
 
         if len(attr_name_and_vals) < 2:
@@ -332,6 +334,7 @@ def sample_extended_question(
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
+    num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
@@ -349,7 +352,7 @@ def sample_extended_question(
         )
     elif question_type == MULTI_CONSTRAINT_TYPE:
         return sample_multi_constraint_question(
-            rng, db, person_name_bank, person_name2attr_name_and_val, num_sampling_attempts
+            rng, db, person_name_bank, person_name2attr_name_and_val, num_procs, num_sampling_attempts
         )
     elif question_type == SUPERLATIVE_OLDEST_TYPE:
         return sample_superlative_age_question(

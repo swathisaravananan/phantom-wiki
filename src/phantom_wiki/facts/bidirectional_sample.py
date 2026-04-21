@@ -221,6 +221,7 @@ def _process_step_forward(
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     relation_bank: list[str],
     used_attrs_per_person: dict[str, set[tuple[str, str]]],
+    num_procs: int,
 ) -> bool:
     """Process a chain step in the FORWARD direction (first arg known, find second).
 
@@ -238,6 +239,7 @@ def _process_step_forward(
             key=person_name,
             db=db,
             query_bank=relation_bank,
+            num_procs=num_procs,
         )
         if not relation_and_related:
             return False
@@ -263,6 +265,7 @@ def _process_step_forward(
             key=person_name,
             db=db,
             query_bank=relation_bank,
+            num_procs=num_procs,
         )
         if not relation_and_related:
             return False
@@ -283,6 +286,7 @@ def _process_step_forward(
             key=person_name,
             db=db,
             query_bank=ATTRIBUTE_TYPES,
+            num_procs=num_procs,
         )
         if not attr_name_and_vals:
             return False
@@ -305,6 +309,7 @@ def _process_step_forward(
             key=person_name,
             db=db,
             query_bank=ATTRIBUTE_TYPES,
+            num_procs=num_procs,
         )
         if not attr_name_and_vals:
             return False
@@ -348,6 +353,7 @@ def _process_step_forward(
             key=person_name,
             db=db,
             query_bank=relation_bank,
+            num_procs=num_procs,
         )
         if not relation_and_related:
             return False
@@ -378,6 +384,7 @@ def _process_step_inverse(
     person_name2inverse_relation: dict[str, list[tuple[str, str]]],
     relation_bank: list[str],
     used_attrs_per_person: dict[str, set[tuple[str, str]]],
+    num_procs: int,
     inverse_map: dict[str, str] | None = None,
 ) -> bool:
     """Process a chain step in the INVERSE direction (second arg known, find first).
@@ -399,6 +406,7 @@ def _process_step_inverse(
             key=person_name,
             db=db,
             query_bank=relation_bank,
+            num_procs=num_procs,
             inverse_map=inverse_map,
         )
         if not inverse_relations:
@@ -420,6 +428,7 @@ def _process_step_inverse(
             key=person_name,
             db=db,
             query_bank=relation_bank,
+            num_procs=num_procs,
             inverse_map=inverse_map,
         )
         if not inverse_relations:
@@ -444,6 +453,7 @@ def _process_step_inverse(
             key=person_name,
             db=db,
             query_bank=ATTRIBUTE_TYPES,
+            num_procs=num_procs,
         )
         if not attr_name_and_vals:
             return False
@@ -481,6 +491,7 @@ def _process_step_inverse(
             key=person_name,
             db=db,
             query_bank=ATTRIBUTE_TYPES,
+            num_procs=num_procs,
         )
         if not attr_name_and_vals:
             return False
@@ -501,6 +512,7 @@ def _process_step_inverse(
                 key=person_name,
                 db=db,
                 query_bank=relation_bank,
+                num_procs=num_procs,
             )
             if not inverse_relations:
                 return False
@@ -521,6 +533,7 @@ def _process_step_inverse(
                 key=person_name,
                 db=db,
                 query_bank=relation_bank,
+                num_procs=num_procs,
             )
             if not inverse_relations:
                 return False
@@ -665,6 +678,7 @@ def sample_question_bidirectional(
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     person_name2inverse_relation: dict[str, list[tuple[str, str]]],
     inverse_map: dict[str, str],
+    num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
     anchor_strategy: str = "random",
@@ -743,6 +757,7 @@ def sample_question_bidirectional(
                     rng, db, person_name_bank,
                     person_name2attr_name_and_val, person_name2relation_and_related,
                     relation_bank, used_attrs_per_person,
+                    num_procs,
                 )
             else:  # inverse
                 ok = _process_step_inverse(
@@ -751,6 +766,7 @@ def sample_question_bidirectional(
                     rng, db, person_name_bank,
                     person_name2attr_name_and_val, person_name2inverse_relation,
                     relation_bank, used_attrs_per_person,
+                    num_procs,
                     inverse_map=inverse_map,
                 )
             if not ok:

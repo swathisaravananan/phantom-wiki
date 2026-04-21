@@ -41,12 +41,13 @@ from ..utils import decode
 from .constants.article_templates import BASIC_ARTICLE_TEMPLATE, TEMPORAL_ARTICLE_TEMPLATE
 
 
-def get_articles(db: Database, names: list[str], include_temporal: bool = False) -> dict:
+def get_articles(db: Database, names: list[str], num_procs: int, include_temporal: bool = False) -> dict:
     """Construct articles for a list of names.
 
     Args:
         db: Database object
         names: list of names
+        num_procs: number of worker processes for batched queries (1 = serial).
         include_temporal: if True, include temporal life events section
     Returns:
         dict of articles for each name
@@ -54,13 +55,13 @@ def get_articles(db: Database, names: list[str], include_temporal: bool = False)
     # HACK: Do not include parent, child, and sibling in the articles
     relation_list = [r for r in FAMILY_RELATION_EASY if r not in ["parent", "child", "sibling"]]
     family_sentences, family_facts = get_relations(
-        db, names, relation_list, FAMILY_FACT_TEMPLATES, FAMILY_FACT_TEMPLATES_PL
+        db, names, relation_list, FAMILY_FACT_TEMPLATES, FAMILY_FACT_TEMPLATES_PL, num_procs
     )
     friend_sentences, friend_facts = get_relations(
-        db, names, FRIENDSHIP_RELATION, FRIENDSHIP_FACT_TEMPLATES, FRIENDSHIP_FACT_TEMPLATES_PL
+        db, names, FRIENDSHIP_RELATION, FRIENDSHIP_FACT_TEMPLATES, FRIENDSHIP_FACT_TEMPLATES_PL, num_procs
     )
     attribute_sentences, attribute_facts = get_attributes(
-        db, names, ATTRIBUTE_TYPES + ["gender"], ATTRIBUTE_FACT_TEMPLATES
+        db, names, ATTRIBUTE_TYPES + ["gender"], ATTRIBUTE_FACT_TEMPLATES, num_procs
     )
 
     temporal_sentences = defaultdict(list)
@@ -104,6 +105,7 @@ def get_relations(
     relation_list: list[str],
     relation_templates: dict[str, str],
     relation_templates_plural: dict[str, str],
+    num_procs: int,
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """
     Get relation sentences for a list of names.
@@ -119,27 +121,30 @@ def get_relations(
     """
     sents = defaultdict(list)
     facts = defaultdict(list)
+
+    pairs = [(name, relation) for name in names for relation in relation_list]
+    queries = [f'distinct({rel}("{nm}", X))' for nm, rel in pairs]
+    all_results = db.batch_query(queries, num_procs)
+
+    name_rel_to_targets: dict[tuple[str, str], list[str]] = {}
+    for (name, relation), results in zip(pairs, all_results):
+        target = []
+        for result in results:
+            decoded_result = decode(result["X"])
+            target.append(decoded_result)
+            facts[name].append(f'{relation}("{name}", "{decoded_result}").')
+        name_rel_to_targets[(name, relation)] = target
+
     for name in names:
         for relation in relation_list:
-            # create list of answers for each relation
-            target = []
-
-            query = f'distinct({relation}("{name}", X))'
-            for result in db.query(query):
-                decoded_result = decode(result["X"])
-                target.append(decoded_result)
-                facts[name].append(f'{relation}("{name}", "{decoded_result}").')
-
+            target = name_rel_to_targets[(name, relation)]
             if not target:
                 continue
-            # Choose the appropriate template based on the number of targets
             if len(target) > 1:
                 relation_template = relation_templates_plural[relation]
             else:
                 relation_template = relation_templates[relation]
-            # Construct the sentence
             sent = relation_template.replace("<subject>", name) + " " + ", ".join(target) + "."
-            # Append the sentence to the list of sentences for the person
             sents[name].append(sent)
     return sents, facts
 
@@ -152,32 +157,40 @@ def get_attributes(
     names: list[str],
     attribute_list: list[str],
     attribute_templates: dict[str, str],
+    num_procs: int,
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """Get attribute sentences for a list of names.
 
     Args:
         db: Database object
         names: list of names
+        num_procs: number of worker processes for batched queries (1 = serial).
     Returns:
         dict of sentences for each name
     """
     sents = defaultdict(list)
     facts = defaultdict(list)
+
+    pairs = [(name, attr) for name in names for attr in attribute_list]
+    queries = [f'{attr}("{nm}", X)' for nm, attr in pairs]
+    all_results = db.batch_query(queries, num_procs)
+
+    name_attr_to_targets: dict[tuple[str, str], list[str]] = {}
+    for (name, attr), results in zip(pairs, all_results):
+        target = []
+        for result in results:
+            decoded_result = decode(result["X"])
+            target.append(decoded_result)
+            facts[name].append(f'{attr}("{name}", "{decoded_result}").')
+        name_attr_to_targets[(name, attr)] = target
+
     for name in names:
         for attr in attribute_list:
-            # create list of answers for each attribute
-            target = []
-            query = f'{attr}("{name}", X)'
-            for result in db.query(query):
-                decoded_result = decode(result["X"])
-                target.append(decoded_result)
-                facts[name].append(f'{attr}("{name}", "{decoded_result}").')
+            target = name_attr_to_targets[(name, attr)]
             if not target:
                 continue
-            # Construct the sentence
             attr_template = attribute_templates[attr]
             sent = attr_template.replace("<subject>", name) + " " + ", ".join(target) + "."
-            # Append the sentence to the list of sentences for the person
             sents[name].append(sent)
     return sents, facts
 
