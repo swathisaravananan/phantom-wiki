@@ -83,6 +83,7 @@ class Database:
         attributes = [decode(result["X"]) for result in self.prolog.query("attribute(X)")]
         return attributes
 
+    # TODO: @anmolkabra, change multi_threading to an int = 4 and call n_procs for Pool()
     def batch_query(self, queries: list[str], multi_threading: bool = False) -> list[list[dict]]:
         """Queries the Prolog database with multiple queries. If multi_threading
          is true, then this function leverages multi processors.
@@ -94,6 +95,7 @@ class Database:
             List of results for each query
         """
         if multi_threading:
+            # TODO: @anmolkabra, change to use Pool(processes=4)
             with Pool() as pool:
                 results = []
                 for result in tqdm(

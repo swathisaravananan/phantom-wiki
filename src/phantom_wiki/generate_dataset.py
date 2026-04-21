@@ -368,6 +368,7 @@ def generate_dataset(
     start = time.time()
 
     # Parse question types
+    # TODO: @anmolkabra, might not need this, just generate all question types
     if question_types is not None:
         parsed_qtypes = [t.strip() for t in question_types.split(",")]
     else:
@@ -397,13 +398,16 @@ def generate_dataset(
     # e.g. "John" -> [("dob", "1990-01-01"), ("job", "teacher"), ("hobby", "reading"),
     # ("hobby", "swimming"), ...]
     # NOTE: Invariant: (attr name, attr value) pairs are unique
+    # TODO: @anmolkabra, improve cache with type dict[str, set[tuple[str, str]]]
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]] = {}
     # e.g. "John" -> [("child", "Alice"), ("child", "Bob"), ("friend", "Charlie"), ...]
     # NOTE: Invariant: (relation, related person) pairs are unique
+    # TODO: @anmolkabra, improve cache with type dict[str, set[tuple[str, str]]]
     person_name2relation_and_related: dict[str, list[tuple[str, str]]] = {}
     # Inverse relation cache for bidirectional sampling: R(A, "key") lookups
     person_name2inverse_relation: dict[str, list[tuple[str, str]]] = {}
     if sampling_method == "bidirectional":
+        # TODO: anmolkabra, might not need prewarm, just populate the cache as sampling continues
         prewarm_inverse_cache(person_name2inverse_relation, db, RELATION)
 
     # To store all the questions and queries for all templates

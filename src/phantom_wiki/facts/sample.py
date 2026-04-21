@@ -77,6 +77,8 @@ def get_vals_and_update_cache(
     else:
         # Query the database with this key for all possible query
         query_and_answer = []
+        # TODO: @anmolkabra, could use multithreading for this for parallel db queries
+        # use db.batch_query instead
         for query in query_bank:
             r: list[dict] = db.query(f'{query}("{key}", A)')
             query_and_answer.extend((query, decode(result["A"])) for result in r)
@@ -114,6 +116,8 @@ def get_inverse_vals_and_update_cache(
     else:
         query_and_answer = []
         for query in query_bank:
+            # TODO: @anmolkabra, could use multithreading for this for parallel db queries
+            # use db.batch_query instead
             if inverse_map and query in inverse_map:
                 inv_name = inverse_map[query]
                 r: list[dict] = db.query(f'{inv_name}("{key}", A)')
@@ -124,6 +128,7 @@ def get_inverse_vals_and_update_cache(
         return query_and_answer
 
 
+# TODO: @anmolkabra, I don't understand this very well
 def prewarm_inverse_cache(
     cache: dict[str, list[tuple[str, str]]],
     db: Database,
@@ -136,6 +141,8 @@ def prewarm_inverse_cache(
     faster than per-person queries which are O(N * R) with unindexed scans.
     """
     for query in query_bank:
+        # TODO: @anmolkabra, could use multithreading for this for parallel db queries
+        # use db.batch_query instead
         results = db.query(f"{query}(X, Y)")
         for r in results:
             x, y = decode(r["X"]), decode(r["Y"])

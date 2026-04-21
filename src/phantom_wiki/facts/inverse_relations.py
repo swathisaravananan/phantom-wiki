@@ -23,6 +23,7 @@ SYMMETRIC_RELATIONS = frozenset({"sibling", "married", "cousin", "friend"})
 ALL_RELATIONS = list(FAMILY_RELATION_DIFFICULTY.keys()) + list(FRIENDSHIP_RELATION)
 
 
+# TODO: @anmolkabra: already defaults to ALL_RELATIONS, remove the optional None type hint
 def build_inverse_relation_map(relation_list: list[str] | None = None) -> dict[str, str]:
     """Build a mapping from each relation to its inverse predicate name.
 
@@ -76,6 +77,8 @@ def register_inverse_predicates(
         db.add(f"({inv_name}(X, Y) :- {rel}(Y, X))")
         registered.append(inv_name)
 
+    # TODO: @anmolkabra, why is this logging not showing to stdout
+    # Might need to use logging.info instead of logger.info
     logger.info(
         "Registered %d inverse predicates (%d symmetric skipped)",
         len(registered),
