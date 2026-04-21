@@ -197,7 +197,7 @@ def process__attr_name__Y__attr_val(
     else:
         # Randomly sample a name from the database for the Y_i placeholder
         # Create new atom variable for the person name
-        person_name_choice = rng.choice(person_name_bank)
+        person_name_choice = person_name_bank[rng.integers(0, len(person_name_bank))]
         query_assignments[y_placeholder] = add_to_atom_assignments(
             atom_assignments, new_atom_val=person_name_choice
         )
@@ -225,7 +225,7 @@ def process__attr_name__Y__attr_val(
         attr_name_and_vals = available
 
     # d. Randomly choose an attribute name and value
-    attribute_name_choice, attribute_value_choice = rng.choice(attr_name_and_vals)
+    attribute_name_choice, attribute_value_choice = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
     query_assignments[attribute_name] = attribute_name_choice
     # Realized values, in this case <attribute_value>, should be in quotes when creating the Prolog query
     query_assignments[attribute_value] = f'"{attribute_value_choice}"'
@@ -268,7 +268,7 @@ def process__relation__name__Y(
     # Selecting a random pair and using it to fill in the query
 
     # a. Randomly sample a name from the database for the <name> placeholder
-    person_name_choice = rng.choice(person_name_bank)
+    person_name_choice = person_name_bank[rng.integers(0, len(person_name_bank))]
     # Realized values, in this case <name>, should be in quotes when creating the Prolog query
     query_assignments[name] = f'"{person_name_choice}"'
 
@@ -286,7 +286,7 @@ def process__relation__name__Y(
         return False
 
     # c. Randomly choose a relation and related person
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation] = relation_choice
 
     # Create new atom variable for the related person name
@@ -344,7 +344,7 @@ def process__relation__Y__Y(
         return False
 
     # c. Randomly choose a relation and related person
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation] = relation_choice
 
     # Create new atom variable for the related person name
@@ -402,7 +402,7 @@ def process__attr_name__Y__Y(
 
     # c. Randomly choose an attribute name and value
     # NOTE: The attribute_value_choice is 'one possible' answer of the question "What is the ..."
-    attribute_name_choice, attribute_value_choice = rng.choice(attr_name_and_vals)
+    attribute_name_choice, attribute_value_choice = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
     query_assignments[attribute_name] = attribute_name_choice
 
     # Add the attribute name and value to the question assignments, could be an alias
@@ -439,7 +439,7 @@ def process__agg__relation_plural__name__Y(
     # Selecting a random pair and using it to fill in the query
 
     # a. Randomly sample a name from the database for the <name> placeholder
-    person_name_choice = rng.choice(person_name_bank)
+    person_name_choice = person_name_bank[rng.integers(0, len(person_name_bank))]
     # Realized values, in this case <name>, should be in quotes when creating the Prolog query
     query_assignments[name] = f'"{person_name_choice}"'
 
@@ -458,7 +458,7 @@ def process__agg__relation_plural__name__Y(
 
     # c. Randomly choose a relation and related person
     # NOTE: The related_person_choice is 'one possible' answer of the question "How many ..."
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation_plural] = relation_choice
 
     # Add the relation to the question assignments, could be an alias
@@ -521,7 +521,7 @@ def process__agg__relation_plural__Y__Y(
 
     # c. Randomly choose a relation and related person
     # NOTE: The related_person_choice is 'one possible' answer of the question "How many ..."
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation_plural] = relation_choice
 
     # Create new atom variable for the related person name
@@ -810,7 +810,7 @@ def sample_forward(
 
     def _sample_atom(match_, bank) -> None:
         """Samples a choice from the `bank` for a <placeholder> indicated by `match_`."""
-        choice_ = rng.choice(bank)
+        choice_ = bank[rng.integers(0, len(bank))]
         query_assignments[match_] = f'"{choice_}"'
         question_assignments[match_] = choice_
 
@@ -822,7 +822,7 @@ def sample_forward(
 
     def _sample_predicate(match_, bank, alias_dict: dict = None) -> None:
         """Samples predicate <placeholder>s (i.e. relation/attribute types)"""
-        choice_ = rng.choice(bank)
+        choice_ = bank[rng.integers(0, len(bank))]
         query_assignments[match_] = choice_
         question_assignments[match_] = alias_dict[choice_] if alias_dict else choice_
 

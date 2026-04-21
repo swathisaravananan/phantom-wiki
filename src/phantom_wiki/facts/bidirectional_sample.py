@@ -190,7 +190,7 @@ def choose_anchor_index(
         raise ValueError("No anchorable slots available")
 
     if strategy == "random":
-        return rng.choice(anchorable_slots)
+        return anchorable_slots[rng.integers(0, len(anchorable_slots))]
     elif strategy == "balanced":
         if _balanced_counter is None:
             _balanced_counter = [0]
@@ -244,7 +244,7 @@ def _process_step_forward(
         if not relation_and_related:
             return False
 
-        relation_choice, related_person = rng.choice(relation_and_related)
+        relation_choice, related_person = relation_and_related[rng.integers(0, len(relation_and_related))]
         query_assignments[relation] = relation_choice
         query_assignments[y2] = add_to_atom_assignments(atom_assignments, related_person)
         question_assignments[relation] = RELATION_ALIAS[relation_choice]
@@ -257,7 +257,7 @@ def _process_step_forward(
         person_name = atom_assignments[query_assignments[name]] if name in query_assignments else None
         if person_name is None:
             # <name> not yet bound — pick a random person
-            person_name = rng.choice(person_name_bank)
+            person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
             query_assignments[name] = f'"{person_name}"'
 
         relation_and_related = get_vals_and_update_cache(
@@ -270,7 +270,7 @@ def _process_step_forward(
         if not relation_and_related:
             return False
 
-        relation_choice, related_person = rng.choice(relation_and_related)
+        relation_choice, related_person = relation_and_related[rng.integers(0, len(relation_and_related))]
         query_assignments[relation] = relation_choice
         query_assignments[y] = add_to_atom_assignments(atom_assignments, related_person)
         question_assignments[relation] = RELATION_ALIAS[relation_choice]
@@ -291,7 +291,7 @@ def _process_step_forward(
         if not attr_name_and_vals:
             return False
 
-        attr_choice, attr_val = rng.choice(attr_name_and_vals)
+        attr_choice, attr_val = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
         query_assignments[attribute_name] = attr_choice
         question_assignments[attribute_name] = ATTRIBUTE_ALIASES[attr_choice]
         return True
@@ -301,7 +301,7 @@ def _process_step_forward(
         if y in query_assignments:
             person_name = atom_assignments[query_assignments[y]]
         else:
-            person_name = rng.choice(person_name_bank)
+            person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
             query_assignments[y] = add_to_atom_assignments(atom_assignments, person_name)
 
         attr_name_and_vals = get_vals_and_update_cache(
@@ -321,7 +321,7 @@ def _process_step_forward(
                 return False
             attr_name_and_vals = available
 
-        attr_choice, attr_val = rng.choice(attr_name_and_vals)
+        attr_choice, attr_val = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
         query_assignments[attribute_name] = attr_choice
         query_assignments[attribute_value] = f'"{attr_val}"'
 
@@ -337,7 +337,7 @@ def _process_step_forward(
         if step_type == "agg_name":
             relation_plural, name, y, count = m.group(1, 2, 3, 4)
             if name not in query_assignments:
-                person_name = rng.choice(person_name_bank)
+                person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
                 query_assignments[name] = f'"{person_name}"'
             else:
                 person_name = atom_assignments.get(
@@ -358,7 +358,7 @@ def _process_step_forward(
         if not relation_and_related:
             return False
 
-        relation_choice, related_person = rng.choice(relation_and_related)
+        relation_choice, related_person = relation_and_related[rng.integers(0, len(relation_and_related))]
         query_assignments[relation_plural] = relation_choice
         question_assignments[relation_plural] = RELATION_PLURAL_ALIAS[relation_choice]
         if step_type == "agg_name":
@@ -412,7 +412,7 @@ def _process_step_inverse(
         if not inverse_relations:
             return False
 
-        relation_choice, found_person = rng.choice(inverse_relations)
+        relation_choice, found_person = inverse_relations[rng.integers(0, len(inverse_relations))]
         query_assignments[relation] = relation_choice
         query_assignments[y1] = add_to_atom_assignments(atom_assignments, found_person)
         question_assignments[relation] = RELATION_ALIAS[relation_choice]
@@ -434,7 +434,7 @@ def _process_step_inverse(
         if not inverse_relations:
             return False
 
-        relation_choice, found_person = rng.choice(inverse_relations)
+        relation_choice, found_person = inverse_relations[rng.integers(0, len(inverse_relations))]
         query_assignments[relation] = relation_choice
         query_assignments[name] = f'"{found_person}"'
         question_assignments[relation] = RELATION_ALIAS[relation_choice]
@@ -465,7 +465,7 @@ def _process_step_inverse(
                 return False
             attr_name_and_vals = available
 
-        attr_choice, attr_val = rng.choice(attr_name_and_vals)
+        attr_choice, attr_val = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
         query_assignments[attribute_name] = attr_choice
         query_assignments[attribute_value] = f'"{attr_val}"'
 
@@ -496,7 +496,7 @@ def _process_step_inverse(
         if not attr_name_and_vals:
             return False
 
-        attr_choice, attr_val = rng.choice(attr_name_and_vals)
+        attr_choice, attr_val = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
         query_assignments[attribute_name] = attr_choice
         question_assignments[attribute_name] = ATTRIBUTE_ALIASES[attr_choice]
         return True
@@ -517,7 +517,7 @@ def _process_step_inverse(
             if not inverse_relations:
                 return False
 
-            relation_choice, found_person = rng.choice(inverse_relations)
+            relation_choice, found_person = inverse_relations[rng.integers(0, len(inverse_relations))]
             query_assignments[relation_plural] = relation_choice
             query_assignments[name] = f'"{found_person}"'
             question_assignments[relation_plural] = RELATION_PLURAL_ALIAS[relation_choice]
@@ -538,7 +538,7 @@ def _process_step_inverse(
             if not inverse_relations:
                 return False
 
-            relation_choice, found_person = rng.choice(inverse_relations)
+            relation_choice, found_person = inverse_relations[rng.integers(0, len(inverse_relations))]
             query_assignments[relation_plural] = relation_choice
             query_assignments[y1] = add_to_atom_assignments(atom_assignments, found_person)
             question_assignments[relation_plural] = RELATION_PLURAL_ALIAS[relation_choice]
@@ -741,7 +741,7 @@ def sample_question_bidirectional(
         used_attrs_per_person: dict[str, set[tuple[str, str]]] = {}
 
         # Bind the anchor variable to a random person
-        anchor_person = rng.choice(person_name_bank)
+        anchor_person = person_name_bank[rng.integers(0, len(person_name_bank))]
         query_assignments[anchor_var] = add_to_atom_assignments(
             atom_assignments, anchor_person
         )
