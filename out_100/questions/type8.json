@@ -40,10 +40,10 @@
         "type": 8,
         "reasoning_steps": 4,
         "difficulty": {
-            "hops": 4,
-            "constraints": 2,
-            "composite": 6,
-            "level": "medium"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -89,10 +89,10 @@
         "type": 8,
         "reasoning_steps": 5,
         "difficulty": {
-            "hops": 5,
-            "constraints": 2,
-            "composite": 7,
-            "level": "medium"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -138,10 +138,10 @@
         "type": 8,
         "reasoning_steps": 2,
         "difficulty": {
-            "hops": 2,
-            "constraints": 2,
-            "composite": 4,
-            "level": "easy"
+            "hops": 1,
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -187,10 +187,10 @@
         "type": 8,
         "reasoning_steps": 4,
         "difficulty": {
-            "hops": 4,
-            "constraints": 2,
-            "composite": 6,
-            "level": "medium"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -236,10 +236,10 @@
         "type": 8,
         "reasoning_steps": 6,
         "difficulty": {
-            "hops": 6,
-            "constraints": 2,
-            "composite": 8,
-            "level": "hard"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -285,10 +285,10 @@
         "type": 8,
         "reasoning_steps": 2,
         "difficulty": {
-            "hops": 2,
-            "constraints": 2,
-            "composite": 4,
-            "level": "easy"
+            "hops": 1,
+            "constraints": 1,
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -334,10 +334,10 @@
         "type": 8,
         "reasoning_steps": 5,
         "difficulty": {
-            "hops": 5,
-            "constraints": 2,
-            "composite": 7,
-            "level": "medium"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -383,10 +383,10 @@
         "type": 8,
         "reasoning_steps": 4,
         "difficulty": {
-            "hops": 4,
-            "constraints": 2,
-            "composite": 6,
-            "level": "medium"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -432,10 +432,10 @@
         "type": 8,
         "reasoning_steps": 4,
         "difficulty": {
-            "hops": 4,
-            "constraints": 2,
-            "composite": 6,
-            "level": "medium"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"
@@ -481,10 +481,10 @@
         "type": 8,
         "reasoning_steps": 6,
         "difficulty": {
-            "hops": 6,
-            "constraints": 2,
-            "composite": 8,
-            "level": "hard"
+            "hops": 3,
+            "constraints": 1,
+            "composite": 4,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_age"

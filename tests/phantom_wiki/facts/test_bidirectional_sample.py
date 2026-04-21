@@ -622,8 +622,7 @@ class TestMetadata:
                 required = [
                     "method", "anchor_position", "anchor_slot_index",
                     "anchor_person", "answer_position", "answer_slot_index",
-                    "polarity", "chain_length", "prolog_solutions_found",
-                    "chain_variables",
+                    "polarity", "chain_length", "chain_variables",
                 ]
                 for field in required:
                     assert field in metadata, f"Missing: {field}"

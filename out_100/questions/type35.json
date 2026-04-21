@@ -32,10 +32,10 @@
         "type": 35,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 0,
-            "composite": 3,
-            "level": "easy"
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -73,9 +73,9 @@
         "type": 35,
         "reasoning_steps": 2,
         "difficulty": {
-            "hops": 2,
+            "hops": 1,
             "constraints": 0,
-            "composite": 2,
+            "composite": 1,
             "level": "trivial"
         },
         "is_aggregation_question": false,
@@ -114,10 +114,10 @@
         "type": 35,
         "reasoning_steps": 3,
         "difficulty": {
-            "hops": 3,
+            "hops": 2,
             "constraints": 0,
-            "composite": 3,
-            "level": "easy"
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -237,10 +237,10 @@
         "type": 35,
         "reasoning_steps": 6,
         "difficulty": {
-            "hops": 6,
+            "hops": 3,
             "constraints": 0,
-            "composite": 6,
-            "level": "medium"
+            "composite": 3,
+            "level": "easy"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
@@ -401,10 +401,10 @@
         "type": 35,
         "reasoning_steps": 4,
         "difficulty": {
-            "hops": 4,
+            "hops": 2,
             "constraints": 0,
-            "composite": 4,
-            "level": "easy"
+            "composite": 2,
+            "level": "trivial"
         },
         "is_aggregation_question": false,
         "question_category": "comparison_born_first"
