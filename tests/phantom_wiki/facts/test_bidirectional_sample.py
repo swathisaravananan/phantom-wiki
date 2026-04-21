@@ -81,8 +81,8 @@ def caches(db, person_names):
     attr_cache: dict[str, list[tuple[str, str]]] = {}
     rel_cache: dict[str, list[tuple[str, str]]] = {}
     for name in person_names:
-        get_vals_and_update_cache(attr_cache, name, db, ATTRIBUTE_TYPES)
-        get_vals_and_update_cache(rel_cache, name, db, RELATION)
+        get_vals_and_update_cache(attr_cache, name, db, ATTRIBUTE_TYPES, num_procs=1)
+        get_vals_and_update_cache(rel_cache, name, db, RELATION, num_procs=1)
     return attr_cache, rel_cache
 
 
@@ -254,7 +254,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -276,7 +276,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, anchor_strategy="start",
             )
             if result is not None:
@@ -296,7 +296,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, anchor_strategy="end",
             )
             if result is not None:
@@ -316,7 +316,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, anchor_strategy="middle",
             )
             if result is not None:
@@ -339,7 +339,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, anchor_strategy="random",
             )
             if result is not None:
@@ -361,7 +361,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = base_templates[0]
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, anchor_strategy="balanced",
                 _balanced_counter=counter,
             )
@@ -384,7 +384,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=100,
             )
             if result is not None:
@@ -402,7 +402,7 @@ class TestSamplingCorrectness:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -425,9 +425,9 @@ class TestBackwardsCompatibility:
             rng1 = np.random.default_rng(42)
             rng2 = np.random.default_rng(42)
             r1 = sample_question(q_template, query_template, rng1, db, person_names,
-                                 attr_cache, rel_cache, num_sampling_attempts=50)
+                                 attr_cache, rel_cache, num_procs=1, num_sampling_attempts=50)
             r2 = sample_question(q_template, query_template, rng2, db, person_names,
-                                 attr_cache, rel_cache, num_sampling_attempts=50)
+                                 attr_cache, rel_cache, num_procs=1, num_sampling_attempts=50)
             if r1 is not None and r2 is not None:
                 assert r1[0] == r2[0]
                 assert r1[1] == r2[1]
@@ -443,7 +443,7 @@ class TestBackwardsCompatibility:
             rng = np.random.default_rng(42)
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             results.append(result)
@@ -459,7 +459,7 @@ class TestBackwardsCompatibility:
         for tmpl in base_templates[:5]:
             q_template, query_template, answer = tmpl
             result = sample_question(q_template, query_template, rng, db, person_names,
-                                     attr_cache, rel_cache, num_sampling_attempts=50)
+                                     attr_cache, rel_cache, num_procs=1, num_sampling_attempts=50)
             if result is not None:
                 question, query = result
                 assert question.endswith("?")
@@ -478,7 +478,7 @@ class TestBackwardsCompatibility:
             rng = np.random.default_rng(seed)
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             results.append(result)
@@ -500,7 +500,7 @@ class TestAnswerPosition:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, answer_position="head",
             )
             if result is not None:
@@ -521,7 +521,7 @@ class TestAnswerPosition:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, answer_position="tail",
             )
             if result is not None:
@@ -544,7 +544,7 @@ class TestAnswerPosition:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, answer_position="random",
             )
             if result is not None:
@@ -567,7 +567,7 @@ class TestAnswerPosition:
                 q_template, query_template, answer = tmpl
                 result = sample_question_bidirectional(
                     q_template, query_template, rng, db, person_names,
-                    attr_cache, rel_cache, inv_cache, inverse_map,
+                    attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                     num_sampling_attempts=50, anchor_strategy=strategy,
                     answer_position="head",
                 )
@@ -588,7 +588,7 @@ class TestAnswerPosition:
                 q_template, query_template, answer = tmpl
                 result = sample_question_bidirectional(
                     q_template, query_template, rng, db, person_names,
-                    attr_cache, rel_cache, inv_cache, inverse_map,
+                    attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                     num_sampling_attempts=50, answer_position=pos,
                 )
                 if result is not None:
@@ -614,7 +614,7 @@ class TestMetadata:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -630,6 +630,25 @@ class TestMetadata:
                 return
         pytest.skip("No result")
 
+    def test_prolog_solutions_found_positive(self, db, person_names, caches, inverse_map,
+                                             base_templates):
+        """prolog_solutions_found >= 1 for valid questions."""
+        attr_cache, rel_cache = caches
+        inv_cache: dict = {}
+        rng = np.random.default_rng(42)
+        for tmpl in base_templates[:15]:
+            q_template, query_template, answer = tmpl
+            result = sample_question_bidirectional(
+                q_template, query_template, rng, db, person_names,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
+                num_sampling_attempts=50,
+            )
+            if result is not None:
+                _, _, metadata = result
+                assert metadata["prolog_solutions_found"] >= 1
+                return
+        pytest.skip("No result")
+
     def test_polarity_values_valid(self, db, person_names, caches, inverse_map, base_templates):
         """Polarity must be one of same, same_side, opposite."""
         attr_cache, rel_cache = caches
@@ -639,7 +658,7 @@ class TestMetadata:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -658,7 +677,7 @@ class TestMetadata:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -677,7 +696,7 @@ class TestMetadata:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -699,7 +718,7 @@ class TestEdgeCases:
         rng = np.random.default_rng(42)
         result = sample_question_bidirectional(
             ["What", "is", "?"], ["static_predicate(a, b)"],
-            rng, db, person_names, attr_cache, rel_cache, inv_cache, inverse_map,
+            rng, db, person_names, attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
             num_sampling_attempts=5,
         )
         assert result is None
@@ -714,7 +733,7 @@ class TestEdgeCases:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 easy_mode=True, num_sampling_attempts=50,
             )
             if result is not None:
@@ -735,7 +754,7 @@ class TestEdgeCases:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -780,7 +799,7 @@ class TestStress:
             for _ in range(10):
                 result = sample_question_bidirectional(
                     q_template, query_template, rng, db, person_names,
-                    attr_cache, rel_cache, inv_cache, inverse_map,
+                    attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                     num_sampling_attempts=50,
                 )
                 if result is not None:
@@ -802,7 +821,7 @@ class TestStress:
                 q_template, query_template, answer = tmpl
                 result = sample_question_bidirectional(
                     q_template, query_template, rng, db, person_names,
-                    attr_cache, rel_cache, inv_cache, inverse_map,
+                    attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                     num_sampling_attempts=50, anchor_strategy=strategy,
                 )
                 if result is not None:
@@ -823,7 +842,7 @@ class TestStress:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -844,7 +863,7 @@ class TestStress:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50, answer_position="random",
             )
             if result is not None:
@@ -865,7 +884,7 @@ class TestStress:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -888,7 +907,7 @@ class TestStress:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:
@@ -905,7 +924,7 @@ class TestStress:
             q_template, query_template, answer = tmpl
             result = sample_question_bidirectional(
                 q_template, query_template, rng, db, person_names,
-                attr_cache, rel_cache, inv_cache, inverse_map,
+                attr_cache, rel_cache, inv_cache, inverse_map, num_procs=1,
                 num_sampling_attempts=50,
             )
             if result is not None:

@@ -57,6 +57,7 @@ def get_vals_and_update_cache(
     key: str,
     db: Database,
     query_bank: list[str],
+    num_procs: int,
 ) -> list[tuple[str, str]]:
     """
     Returns the values for a key from the cache if it exists
@@ -68,6 +69,7 @@ def get_vals_and_update_cache(
         key: the key to query the cache with
         db: the Prolog database to query
         query_bank: a list of Prolog queries to query the database with
+        num_procs: number of worker processes for the batched query (1 = serial).
 
     Returns:
         List of `(query, value of A)` pairs
@@ -75,13 +77,11 @@ def get_vals_and_update_cache(
     if key in cache:
         return cache[key]
     else:
-        # Query the database with this key for all possible query
+        queries = [f'{q}("{key}", A)' for q in query_bank]
+        results = db.batch_query(queries, num_procs)
         query_and_answer = []
-        # TODO: @anmolkabra, could use multithreading for this for parallel db queries
-        # use db.batch_query instead
-        for query in query_bank:
-            r: list[dict] = db.query(f'{query}("{key}", A)')
-            query_and_answer.extend((query, decode(result["A"])) for result in r)
+        for q, r in zip(query_bank, results):
+            query_and_answer.extend((q, decode(result["A"])) for result in r)
         cache[key] = query_and_answer
         return query_and_answer
 
@@ -91,6 +91,7 @@ def get_inverse_vals_and_update_cache(
     key: str,
     db: Database,
     query_bank: list[str],
+    num_procs: int,
     inverse_map: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """
@@ -106,6 +107,7 @@ def get_inverse_vals_and_update_cache(
         key: the key to query the cache with (placed in second arg position)
         db: the Prolog database to query
         query_bank: a list of Prolog queries to query the database with
+        num_procs: number of worker processes for the batched query (1 = serial).
         inverse_map: optional mapping from relation to its inverse predicate name
 
     Returns:
@@ -114,25 +116,25 @@ def get_inverse_vals_and_update_cache(
     if key in cache:
         return cache[key]
     else:
-        query_and_answer = []
-        for query in query_bank:
-            # TODO: @anmolkabra, could use multithreading for this for parallel db queries
-            # use db.batch_query instead
-            if inverse_map and query in inverse_map:
-                inv_name = inverse_map[query]
-                r: list[dict] = db.query(f'{inv_name}("{key}", A)')
+        queries = []
+        for q in query_bank:
+            if inverse_map and q in inverse_map:
+                queries.append(f'{inverse_map[q]}("{key}", A)')
             else:
-                r: list[dict] = db.query(f'{query}(A, "{key}")')
-            query_and_answer.extend((query, decode(result["A"])) for result in r)
+                queries.append(f'{q}(A, "{key}")')
+        results = db.batch_query(queries, num_procs)
+        query_and_answer = []
+        for q, r in zip(query_bank, results):
+            query_and_answer.extend((q, decode(result["A"])) for result in r)
         cache[key] = query_and_answer
         return query_and_answer
 
 
-# TODO: @anmolkabra, I don't understand this very well
 def prewarm_inverse_cache(
     cache: dict[str, list[tuple[str, str]]],
     db: Database,
     query_bank: list[str],
+    num_procs: int,
 ) -> None:
     """Bulk-populate the inverse relation cache for all people at once.
 
@@ -140,13 +142,12 @@ def prewarm_inverse_cache(
     inverse mapping Y -> [(R, X), ...].  This is O(total_facts) total — far
     faster than per-person queries which are O(N * R) with unindexed scans.
     """
-    for query in query_bank:
-        # TODO: @anmolkabra, could use multithreading for this for parallel db queries
-        # use db.batch_query instead
-        results = db.query(f"{query}(X, Y)")
+    queries = [f"{q}(X, Y)" for q in query_bank]
+    all_results = db.batch_query(queries, num_procs)
+    for q, results in zip(query_bank, all_results):
         for r in results:
             x, y = decode(r["X"]), decode(r["Y"])
-            cache.setdefault(y, []).append((query, x))
+            cache.setdefault(y, []).append((q, x))
 
 
 def add_to_atom_assignments(atom_assignments: dict[str, str], new_atom_val: str) -> str:
@@ -169,6 +170,7 @@ def process__attr_name__Y__attr_val(
     db: Database,
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
+    num_procs: int,
     used_attrs_per_person: dict[str, set[tuple[str, str]]] = None,
 ) -> bool:
     r"""
@@ -195,7 +197,7 @@ def process__attr_name__Y__attr_val(
     else:
         # Randomly sample a name from the database for the Y_i placeholder
         # Create new atom variable for the person name
-        person_name_choice = rng.choice(person_name_bank)
+        person_name_choice = person_name_bank[rng.integers(0, len(person_name_bank))]
         query_assignments[y_placeholder] = add_to_atom_assignments(
             atom_assignments, new_atom_val=person_name_choice
         )
@@ -206,6 +208,7 @@ def process__attr_name__Y__attr_val(
         key=person_name_choice,
         db=db,
         query_bank=ATTRIBUTE_TYPES,
+        num_procs=num_procs,
     )
 
     if len(attr_name_and_vals) == 0:
@@ -222,7 +225,7 @@ def process__attr_name__Y__attr_val(
         attr_name_and_vals = available
 
     # d. Randomly choose an attribute name and value
-    attribute_name_choice, attribute_value_choice = rng.choice(attr_name_and_vals)
+    attribute_name_choice, attribute_value_choice = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
     query_assignments[attribute_name] = attribute_name_choice
     # Realized values, in this case <attribute_value>, should be in quotes when creating the Prolog query
     query_assignments[attribute_value] = f'"{attribute_value_choice}"'
@@ -249,6 +252,7 @@ def process__relation__name__Y(
     person_name_bank: list[str],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     relation_bank: list[str],
+    num_procs: int,
 ) -> bool:
     r"""
     Processes <relation>_(\d+)(<name>_\d+, Y_\d+) --- only appears at end of query template list
@@ -264,7 +268,7 @@ def process__relation__name__Y(
     # Selecting a random pair and using it to fill in the query
 
     # a. Randomly sample a name from the database for the <name> placeholder
-    person_name_choice = rng.choice(person_name_bank)
+    person_name_choice = person_name_bank[rng.integers(0, len(person_name_bank))]
     # Realized values, in this case <name>, should be in quotes when creating the Prolog query
     query_assignments[name] = f'"{person_name_choice}"'
 
@@ -274,6 +278,7 @@ def process__relation__name__Y(
         key=person_name_choice,
         db=db,
         query_bank=relation_bank,
+        num_procs=num_procs,
     )
 
     if len(relation_and_related) == 0:
@@ -281,7 +286,7 @@ def process__relation__name__Y(
         return False
 
     # c. Randomly choose a relation and related person
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation] = relation_choice
 
     # Create new atom variable for the related person name
@@ -304,6 +309,7 @@ def process__relation__Y__Y(
     db: Database,
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     relation_bank: list[str],
+    num_procs: int,
 ) -> bool:
     r"""
     Processes <relation>_(\d+)(Y_\d+, Y_\d+) --- does not appear at the end of query template list
@@ -330,6 +336,7 @@ def process__relation__Y__Y(
         key=person_1_name_choice,
         db=db,
         query_bank=relation_bank,
+        num_procs=num_procs,
     )
 
     if len(relation_and_related) == 0:
@@ -337,7 +344,7 @@ def process__relation__Y__Y(
         return False
 
     # c. Randomly choose a relation and related person
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation] = relation_choice
 
     # Create new atom variable for the related person name
@@ -358,6 +365,7 @@ def process__attr_name__Y__Y(
     rng: Generator,
     db: Database,
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
+    num_procs: int,
 ) -> bool:
     r"""
     Processes <attribute_name>_(\d+)(Y_\d+, Y_\d+) --- TERMINAL query: only appears at end of query template
@@ -385,6 +393,7 @@ def process__attr_name__Y__Y(
         key=person_name_choice,
         db=db,
         query_bank=ATTRIBUTE_TYPES,
+        num_procs=num_procs,
     )
 
     if len(attr_name_and_vals) == 0:
@@ -393,7 +402,7 @@ def process__attr_name__Y__Y(
 
     # c. Randomly choose an attribute name and value
     # NOTE: The attribute_value_choice is 'one possible' answer of the question "What is the ..."
-    attribute_name_choice, attribute_value_choice = rng.choice(attr_name_and_vals)
+    attribute_name_choice, attribute_value_choice = attr_name_and_vals[rng.integers(0, len(attr_name_and_vals))]
     query_assignments[attribute_name] = attribute_name_choice
 
     # Add the attribute name and value to the question assignments, could be an alias
@@ -411,6 +420,7 @@ def process__agg__relation_plural__name__Y(
     person_name_bank: list[str],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     relation_bank: list[str],
+    num_procs: int,
 ) -> bool:
     r"""
     Processes
@@ -429,7 +439,7 @@ def process__agg__relation_plural__name__Y(
     # Selecting a random pair and using it to fill in the query
 
     # a. Randomly sample a name from the database for the <name> placeholder
-    person_name_choice = rng.choice(person_name_bank)
+    person_name_choice = person_name_bank[rng.integers(0, len(person_name_bank))]
     # Realized values, in this case <name>, should be in quotes when creating the Prolog query
     query_assignments[name] = f'"{person_name_choice}"'
 
@@ -439,6 +449,7 @@ def process__agg__relation_plural__name__Y(
         key=person_name_choice,
         db=db,
         query_bank=relation_bank,
+        num_procs=num_procs,
     )
 
     if len(relation_and_related) == 0:
@@ -447,7 +458,7 @@ def process__agg__relation_plural__name__Y(
 
     # c. Randomly choose a relation and related person
     # NOTE: The related_person_choice is 'one possible' answer of the question "How many ..."
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation_plural] = relation_choice
 
     # Add the relation to the question assignments, could be an alias
@@ -465,6 +476,7 @@ def process__agg__relation_plural__Y__Y(
     db: Database,
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     relation_bank: list[str],
+    num_procs: int,
 ) -> bool:
     r"""
     Processes aggregate_all\(count, distinct\((<relation_plural>_\d+)\((Y_\d+), (Y_\d+)\)\), (Count_\d+)\)
@@ -500,6 +512,7 @@ def process__agg__relation_plural__Y__Y(
         key=person_1_name_choice,
         db=db,
         query_bank=relation_bank,
+        num_procs=num_procs,
     )
 
     if len(relation_and_related) == 0:
@@ -508,7 +521,7 @@ def process__agg__relation_plural__Y__Y(
 
     # c. Randomly choose a relation and related person
     # NOTE: The related_person_choice is 'one possible' answer of the question "How many ..."
-    relation_choice, related_person_choice = rng.choice(relation_and_related)
+    relation_choice, related_person_choice = relation_and_related[rng.integers(0, len(relation_and_related))]
     query_assignments[relation_plural] = relation_choice
 
     # Create new atom variable for the related person name
@@ -529,6 +542,7 @@ def sample_question(
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
+    num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
 ) -> list[str, list[str]]:
@@ -618,6 +632,7 @@ def sample_question(
                     db,
                     person_name_bank,
                     person_name2attr_name_and_val,
+                    num_procs,
                     used_attrs_per_person,
                 )
                 if not is_success:
@@ -635,6 +650,7 @@ def sample_question(
                     person_name_bank,
                     person_name2relation_and_related,
                     relation_bank,
+                    num_procs,
                 )
                 if not is_success:
                     break
@@ -650,6 +666,7 @@ def sample_question(
                     db,
                     person_name2relation_and_related,
                     relation_bank,
+                    num_procs,
                 )
                 if not is_success:
                     break
@@ -665,6 +682,7 @@ def sample_question(
                     rng,
                     db,
                     person_name2attr_name_and_val,
+                    num_procs,
                 )
                 if not is_success:
                     break
@@ -687,6 +705,7 @@ def sample_question(
                     person_name_bank,
                     person_name2relation_and_related,
                     relation_bank,
+                    num_procs,
                 )
                 if not is_success:
                     break
@@ -707,6 +726,7 @@ def sample_question(
                     db,
                     person_name2relation_and_related,
                     relation_bank,
+                    num_procs,
                 )
                 if not is_success:
                     break
@@ -790,7 +810,7 @@ def sample_forward(
 
     def _sample_atom(match_, bank) -> None:
         """Samples a choice from the `bank` for a <placeholder> indicated by `match_`."""
-        choice_ = rng.choice(bank)
+        choice_ = bank[rng.integers(0, len(bank))]
         query_assignments[match_] = f'"{choice_}"'
         question_assignments[match_] = choice_
 
@@ -802,7 +822,7 @@ def sample_forward(
 
     def _sample_predicate(match_, bank, alias_dict: dict = None) -> None:
         """Samples predicate <placeholder>s (i.e. relation/attribute types)"""
-        choice_ = rng.choice(bank)
+        choice_ = bank[rng.integers(0, len(bank))]
         query_assignments[match_] = choice_
         question_assignments[match_] = alias_dict[choice_] if alias_dict else choice_
 

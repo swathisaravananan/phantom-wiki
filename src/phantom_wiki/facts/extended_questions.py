@@ -137,7 +137,7 @@ def sample_comparison_count_question(
         name1 = person_name_bank[idxs[0]]
         name2 = person_name_bank[idxs[1]]
 
-        relation = rng.choice(relation_bank)
+        relation = relation_bank[rng.integers(0, len(relation_bank))]
         relation_plural = RELATION_PLURAL_ALIAS.get(relation, relation + "s")
 
         # Check both have at least one of this relation and counts differ
@@ -170,6 +170,7 @@ def sample_multi_constraint_question(
     db: Database,
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
+    num_procs: int,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
     """Sample: 'Who is the person whose <attr_1> is <val_1> and whose <attr_2> is <val_2>?'
@@ -179,13 +180,14 @@ def sample_multi_constraint_question(
     Answer variable: X
     """
     for _ in range(num_sampling_attempts):
-        person_name = rng.choice(person_name_bank)
+        person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
 
         attr_name_and_vals: list[tuple[str, str]] = get_vals_and_update_cache(
             cache=person_name2attr_name_and_val,
             key=person_name,
             db=db,
             query_bank=ATTRIBUTE_TYPES,
+            num_procs=num_procs,
         )
 
         if len(attr_name_and_vals) < 2:
@@ -232,8 +234,8 @@ def sample_superlative_age_question(
     relation_bank = RELATION_EASY if easy_mode else RELATION
 
     for _ in range(num_sampling_attempts):
-        person_name = rng.choice(person_name_bank)
-        relation = rng.choice(relation_bank)
+        person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
+        relation = relation_bank[rng.integers(0, len(relation_bank))]
         relation_alias = RELATION_ALIAS.get(relation, relation)
 
         # Check this person has at least 2 of this relation (otherwise superlative is trivial)
@@ -280,11 +282,11 @@ def sample_superlative_most_question(
     relation_bank = RELATION_EASY if easy_mode else RELATION
 
     for _ in range(num_sampling_attempts):
-        person_name = rng.choice(person_name_bank)
+        person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
         # relation_2 is the group relation (e.g., "siblings of name")
-        relation_2 = rng.choice(relation_bank)
+        relation_2 = relation_bank[rng.integers(0, len(relation_bank))]
         # relation_1 is what we count (e.g., "children")
-        relation_1 = rng.choice(relation_bank)
+        relation_1 = relation_bank[rng.integers(0, len(relation_bank))]
 
         relation_1_plural = RELATION_PLURAL_ALIAS.get(relation_1, relation_1 + "s")
         relation_2_plural = RELATION_PLURAL_ALIAS.get(relation_2, relation_2 + "s")
@@ -332,6 +334,7 @@ def sample_extended_question(
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
+    num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
@@ -349,7 +352,7 @@ def sample_extended_question(
         )
     elif question_type == MULTI_CONSTRAINT_TYPE:
         return sample_multi_constraint_question(
-            rng, db, person_name_bank, person_name2attr_name_and_val, num_sampling_attempts
+            rng, db, person_name_bank, person_name2attr_name_and_val, num_procs, num_sampling_attempts
         )
     elif question_type == SUPERLATIVE_OLDEST_TYPE:
         return sample_superlative_age_question(

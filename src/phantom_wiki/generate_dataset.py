@@ -192,7 +192,7 @@ def generate_dataset(
     debug: bool = False,
     quiet: bool = False,
     visualize: bool = False,
-    use_multithreading: bool = False,
+    num_multiprocesses: int = 1,
     seed: int = 1,
     output_dir: str = "./out",
     article_format: str = "txt",
@@ -247,9 +247,10 @@ def generate_dataset(
         quiet (bool): Enable quiet (no) output (WARNING level). (default=False)
         visualize (bool): Whether or not to visualize the friendship & family graphs.
             (default=False)
-        use_multithreading (bool): Use multithreading for querying the database when
-            generating questions/answers. Note: This flag works for Windows and Linux,
-            but not for MacOS. Also very intensive for high universe size. (default=False)
+        num_multiprocesses (int): Number of worker processes for batched Prolog queries.
+            1 (default) runs serially; values >1 use multiprocessing.Pool(processes=N).
+            Note: multiprocessing works on Windows and Linux but not on macOS; also
+            memory-intensive for high universe sizes. (default=1)
         seed (int): Global seed for random number generator. (default=1)
         output_dir (str): Path to the output folder. (default="./out")
         article_format (str): Format to save the generated articles. Options: 'txt', 'json'.
@@ -331,7 +332,7 @@ def generate_dataset(
     #
     blue("Generating articles")
     start = time.time()
-    articles = get_articles(db, db.get_person_names())
+    articles = get_articles(db, db.get_person_names(), num_multiprocesses)
     timings["articles_generate"] = time.time() - start
 
     blue("Saving articles")
@@ -408,7 +409,7 @@ def generate_dataset(
     person_name2inverse_relation: dict[str, list[tuple[str, str]]] = {}
     if sampling_method == "bidirectional":
         # TODO: anmolkabra, might not need prewarm, just populate the cache as sampling continues
-        prewarm_inverse_cache(person_name2inverse_relation, db, RELATION)
+        prewarm_inverse_cache(person_name2inverse_relation, db, RELATION, num_multiprocesses)
 
     # To store all the questions and queries for all templates
     all_questions = []
@@ -447,6 +448,7 @@ def generate_dataset(
                     person_name2relation_and_related,
                     person_name2inverse_relation,
                     inverse_map,
+                    num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
                     anchor_strategy=anchor_strategy,
@@ -468,6 +470,7 @@ def generate_dataset(
                         person_name_bank,
                         person_name2attr_name_and_val,
                         person_name2relation_and_related,
+                        num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=num_sampling_attempts,
                     )
@@ -484,6 +487,7 @@ def generate_dataset(
                     person_name_bank,
                     person_name2attr_name_and_val,
                     person_name2relation_and_related,
+                    num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
                 )
@@ -518,6 +522,7 @@ def generate_dataset(
                         person_name_bank,
                         person_name2attr_name_and_val,
                         person_name2relation_and_related,
+                        num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=1,
                     )
@@ -571,6 +576,7 @@ def generate_dataset(
                     person_name_bank,
                     person_name2attr_name_and_val,
                     person_name2relation_and_related,
+                    num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
                 )
@@ -606,7 +612,7 @@ def generate_dataset(
         db,
         answers,
         skip_solution_traces=skip_solution_traces,
-        multi_threading=use_multithreading,
+        num_procs=num_multiprocesses,
     )
 
     all_full_questions = []
