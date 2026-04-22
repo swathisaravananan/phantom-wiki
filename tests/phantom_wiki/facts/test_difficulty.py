@@ -285,14 +285,6 @@ class TestOutputSchema:
         for q in self._questions:
             assert required.issubset(set(q["difficulty"].keys()))
 
-    def test_reasoning_steps_present(self):
-        for q in self._questions:
-            assert "reasoning_steps" in q
-
-    def test_reasoning_steps_equals_hops(self):
-        for q in self._questions:
-            assert q["reasoning_steps"] == q["difficulty"]["hops"]
-
     def test_composite_equals_hops_plus_constraints(self):
         for q in self._questions:
             d = q["difficulty"]

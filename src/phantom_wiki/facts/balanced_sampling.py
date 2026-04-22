@@ -262,8 +262,7 @@ def sample_questions(
         seed: RNG seed for reproducibility.
 
     Returns:
-        List of ``count`` question dicts, each annotated with
-        ``reasoning_steps`` (alias of ``difficulty``).
+        List of ``count`` question dicts.
 
     Raises:
         ValueError: If ``difficulty`` is used together with ``min_steps`` /
@@ -310,10 +309,6 @@ def sample_questions(
     rng = np.random.default_rng(seed=seed)
     indices = rng.choice(len(pool), size=count, replace=False)
     sampled = [pool[int(i)] for i in indices]
-
-    # Annotate with reasoning_steps alias (composite for backwards compat)
-    for q in sampled:
-        q["reasoning_steps"] = _extract_composite(q["difficulty"])
 
     logger.info(
         f"Sampled {count} questions (pool size {len(pool)}, "

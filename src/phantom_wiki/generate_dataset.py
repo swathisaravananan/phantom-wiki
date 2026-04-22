@@ -45,15 +45,6 @@ from .utils import blue, generate_unique_id
 from .utils.get_answer import get_answer
 
 
-def _build_difficulty_fields(query: list[str]) -> dict:
-    """Build both the structured difficulty dict and the legacy scalar."""
-    structured = compute_difficulty(query)
-    return {
-        "reasoning_steps": structured["hops"],
-        "difficulty": structured,
-    }
-
-
 def _get_extended_cfg_answer(
     question: str,
     query: list[str],
@@ -560,7 +551,6 @@ def generate_dataset(
                 answer_list = _get_extended_cfg_answer(
                     questions[j], queries[j], answer_info, question_subtype, db
                 )
-                diff = _build_difficulty_fields(queries[j])
                 q_type = classify_question_type(question_template)
                 extended_cfg_questions_data.append(
                     {
@@ -571,8 +561,7 @@ def generate_dataset(
                         "prolog": {"query": queries[j], "answer": str(answer_info)},
                         "template": question_template,
                         "type": len(base_templates) + tmpl_idx,
-                        "reasoning_steps": diff["reasoning_steps"],
-                        "difficulty": diff["difficulty"],
+                        "difficulty": compute_difficulty(queries[j]),
                         "is_aggregation_question": False,
                         "question_category": question_subtype,
                     }
@@ -611,7 +600,6 @@ def generate_dataset(
             # Get answers for extended questions
             for j in range(len(questions)):
                 answer_list = get_extended_answer(questions[j], queries[j], qtype, db)
-                diff = _build_difficulty_fields(queries[j])
                 extended_questions_data.append(
                     {
                         "id": generate_unique_id(),
@@ -621,8 +609,7 @@ def generate_dataset(
                         "prolog": {"query": queries[j], "answer": "X"},
                         "template": [qtype],
                         "type": len(base_templates) + len(extended_cfg_templates) + EXTENDED_QUESTION_TYPES.index(qtype),
-                        "reasoning_steps": diff["reasoning_steps"],
-                        "difficulty": diff["difficulty"],
+                        "difficulty": compute_difficulty(queries[j]),
                         "is_aggregation_question": False,
                         "question_category": qtype,
                     }
@@ -647,7 +634,6 @@ def generate_dataset(
         for j in range(len(all_questions[i])):
             question = all_questions[i][j]
             query = all_queries[i][j]
-            diff = _build_difficulty_fields(query)
 
             q_dict = {
                 "id": generate_unique_id(),
@@ -659,8 +645,7 @@ def generate_dataset(
                 "prolog": {"query": query, "answer": answer},
                 "template": question_template,
                 "type": i,  # this references the template type
-                "reasoning_steps": diff["reasoning_steps"],
-                "difficulty": diff["difficulty"],
+                "difficulty": compute_difficulty(query),
                 "is_aggregation_question": is_aggregation_question(question),
             }
             # Add sampling metadata for bidirectional sampling

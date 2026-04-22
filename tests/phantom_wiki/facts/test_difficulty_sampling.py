@@ -153,13 +153,6 @@ class TestSampleQuestions:
         result = sample_questions(questions, count=3)
         assert len(result) == 3
 
-    def test_adds_reasoning_steps_field(self):
-        questions = _make_questions([5, 6, 7])
-        result = sample_questions(questions, count=2)
-        for q in result:
-            assert "reasoning_steps" in q
-            assert q["reasoning_steps"] == q["difficulty"]
-
     def test_filter_by_difficulty_level(self):
         # trivial=1-2, easy=3-4, medium=5-7
         questions = _make_questions([1, 2, 3, 4, 5, 6, 7])
