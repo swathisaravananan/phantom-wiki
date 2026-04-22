@@ -85,6 +85,11 @@ COMPARISON_COUNT_MORE_SUBTYPE = "comparison_count_more"
 COMPARISON_COUNT_FEWER_SUBTYPE = "comparison_count_fewer"
 MULTI_CONSTRAINT_2_SUBTYPE = "multi_constraint_2"
 MULTI_CONSTRAINT_3_SUBTYPE = "multi_constraint_3"
+COMPARISON_AGE_MC2_SUBTYPE = "comparison_age_mc2"
+COMPARISON_AGE_YOUNGER_MC2_SUBTYPE = "comparison_age_younger_mc2"
+COMPARISON_BORN_FIRST_MC2_SUBTYPE = "comparison_born_first_mc2"
+SUPERLATIVE_OLDEST_MC2_SUBTYPE = "superlative_oldest_mc2"
+SUPERLATIVE_YOUNGEST_MC2_SUBTYPE = "superlative_youngest_mc2"
 SUPERLATIVE_OLDEST_SUBTYPE = "superlative_oldest"
 SUPERLATIVE_YOUNGEST_SUBTYPE = "superlative_youngest"
 SUPERLATIVE_MOST_SUBTYPE = "superlative_most"
@@ -175,25 +180,51 @@ def _generate_extended_templates(
     multi-constraint, and superlative question templates. Each R_c fragment already has the
     correct question text and Prolog query for its chain depth.
 
+    Also feeds multi-constraint fragments (0 hops, 2 constraints) into the comparison and
+    superlative builders so that one branch can carry 2 constraints while the other carries
+    hops — unlocking (hops>=1, constraints>=2) cells.
+
     Returns 4-tuples: (question_template, query_template, answer_info, question_subtype).
     """
     templates = []
 
-    # Generate R_c fragments at various sub-depths.
-    # We need fragments from depth 3 (minimum for R_c to expand) up to the full depth.
-    # Each fragment carries its own variable numbering based on depth.
     rc_fragments = _generate_head_template_fragments(grammar, rc_nonterminal, depth, depth)
+    mc2_fragments = _build_mc2_fragments(depth)
 
     if QUESTION_TYPE_COMPARISON in extended_types:
         templates += _build_comparison_templates(grammar, rc_fragments, depth)
+        templates += _build_comparison_mc2_templates(rc_fragments, mc2_fragments, depth)
 
     if QUESTION_TYPE_MULTI_CONSTRAINT in extended_types:
         templates += _build_multi_constraint_templates(depth)
 
     if QUESTION_TYPE_SUPERLATIVE in extended_types:
         templates += _build_superlative_templates(grammar, rc_fragments, depth)
+        templates += _build_superlative_mc2_templates(mc2_fragments, depth)
 
     return templates
+
+
+def _build_mc2_fragments(depth: int) -> list["Fragment"]:
+    """Build Fragment objects representing a 2-attribute multi-constraint person lookup.
+
+    Each fragment represents: 'the person whose AN1 is AV1 and whose AN2 is AV2'
+    with query atoms [AN1(Y_person, AV1), AN2(Y_person, AV2)] and answer Y_person.
+
+    These are used as R_c substitutes in comparison/superlative builders so that one
+    branch can carry 2 constraints, enabling (hops>=1, constraints>=2) questions.
+    """
+    # Use a high offset to avoid variable collisions with base R_c fragments
+    offset = depth * 10
+    an1 = f"<attribute_name>_{offset}"
+    av1 = f"<attribute_value>_{offset}"
+    an2 = f"<attribute_name>_{offset + 1}"
+    av2 = f"<attribute_value>_{offset + 1}"
+    person_var = f"Y_{offset}"
+
+    q = ["the person whose", an1, "is", av1, "and whose", an2, "is", av2]
+    p = [f"{an1}({person_var}, {av1})", f"{an2}({person_var}, {av2})"]
+    return [Fragment(q_fragment=q, p_fragment=p, p_answer=person_var)]
 
 
 def _renumber_fragment(fragment: "Fragment", offset: int) -> "Fragment":
@@ -222,14 +253,115 @@ def _get_person_var(fragment: "Fragment") -> str:
 
 
 def _count_hops(fragment: "Fragment") -> int:
-    """Count the number of resolution hops in an R_c fragment.
+    """Count the number of relation hops in an R_c fragment.
 
-    N -> 0 hops (direct name lookup)
-    R -> number of chain steps
+    N (name) -> 0 hops
+    R (attr only) -> 0 hops (attribute constraint, no relation traversal)
+    R (chain) -> number of relation predicates in p_fragment
     """
-    if fragment.p_answer is None and len(fragment.p_fragment) <= 1:
-        return 0  # Just a name
-    return len(fragment.p_fragment)
+    return sum(
+        1 for atom in fragment.p_fragment
+        if re.match(r"<relation>_\d+", atom)
+    )
+
+
+def _build_comparison_mc2_templates(
+    rc_fragments: list["Fragment"],
+    mc2_fragments: list["Fragment"],
+    depth: int,
+) -> list[tuple]:
+    """Build comparison templates where one branch is a multi-constraint (2-attr) fragment.
+
+    Pairs each R_c fragment (which contributes hops) with a mc2 fragment (which contributes
+    2 constraints), producing questions like:
+      'Who is older, the wife of the person whose hobby is X
+       or the person whose job is Y and whose hobby is Z?'
+
+    This unlocks (hops>=1, constraints>=2) cells since max(rc_constraints=1, mc2_constraints=2)=2
+    while max(rc_hops>=1, mc2_hops=0)>=1.
+    """
+    templates = []
+    dob_l_var = f"CmpDL_{depth}"
+    dob_r_var = f"CmpDR_{depth}"
+
+    for rc_frag in rc_fragments:
+        if _count_hops(rc_frag) == 0:
+            continue  # skip name/attribute-only frags — no hops to pair with
+
+        for mc2_frag in mc2_fragments:
+            mc2_var = _get_person_var(mc2_frag)
+            rc_var = _get_person_var(rc_frag)
+
+            # rc on the left, mc2 on the right
+            age_query = (
+                [f"{dob_l_var} @< {dob_r_var}",
+                 f"dob({rc_var}, {dob_l_var})",
+                 f"dob({mc2_var}, {dob_r_var})"]
+                + rc_frag.p_fragment
+                + mc2_frag.p_fragment
+            )
+            for subtype, prefix in [
+                (COMPARISON_AGE_MC2_SUBTYPE, ["Who is older,"]),
+                (COMPARISON_AGE_YOUNGER_MC2_SUBTYPE, ["Who is younger,"]),
+                (COMPARISON_BORN_FIRST_MC2_SUBTYPE, ["Who was born first,"]),
+            ]:
+                q = prefix + rc_frag.q_fragment + ["or"] + mc2_frag.q_fragment + ["?"]
+                templates.append((q, age_query, (rc_var, mc2_var), subtype))
+
+            # Also mc2 on the left, rc on the right (reversed)
+            age_query_rev = (
+                [f"{dob_l_var} @< {dob_r_var}",
+                 f"dob({mc2_var}, {dob_l_var})",
+                 f"dob({rc_var}, {dob_r_var})"]
+                + mc2_frag.p_fragment
+                + rc_frag.p_fragment
+            )
+            for subtype, prefix in [
+                (COMPARISON_AGE_MC2_SUBTYPE, ["Who is older,"]),
+                (COMPARISON_AGE_YOUNGER_MC2_SUBTYPE, ["Who is younger,"]),
+                (COMPARISON_BORN_FIRST_MC2_SUBTYPE, ["Who was born first,"]),
+            ]:
+                q = prefix + mc2_frag.q_fragment + ["or"] + rc_frag.q_fragment + ["?"]
+                templates.append((q, age_query_rev, (mc2_var, rc_var), subtype))
+
+    return templates
+
+
+def _build_superlative_mc2_templates(
+    mc2_fragments: list["Fragment"],
+    depth: int,
+) -> list[tuple]:
+    """Build superlative templates where the anchor chain is a multi-constraint fragment.
+
+    'Who is the oldest [relation] of the person whose [attr1] is X and whose [attr2] is Y?'
+
+    The mc2 fragment (0 hops, 2 constraints) provides the anchor person; a fresh relation
+    placeholder adds hops — producing (hops>=1, constraints>=2) questions.
+    """
+    templates = []
+    rel_d = f"<relation>_{depth + 1}"
+    answer_var = f"Y_{depth + 1}"
+    sup_d1 = f"SupD_{depth}"
+    sup_d2 = f"SupD2_{depth}"
+    sup_z = f"SupZ_{depth}"
+
+    for mc2_frag in mc2_fragments:
+        mc2_person = _get_person_var(mc2_frag)
+
+        for subtype, adj, op in [
+            (SUPERLATIVE_OLDEST_MC2_SUBTYPE, "oldest", "@<"),
+            (SUPERLATIVE_YOUNGEST_MC2_SUBTYPE, "youngest", "@>"),
+        ]:
+            q = ["Who is", f"the {adj}", rel_d, "of"] + mc2_frag.q_fragment + ["?"]
+            query = [
+                f"\\+ ({rel_d}({mc2_person}, {sup_z}), dob({sup_z}, {sup_d2}), "
+                f"{sup_z} \\= {answer_var}, {sup_d2} {op} {sup_d1})",
+                f"dob({answer_var}, {sup_d1})",
+                f"{rel_d}({mc2_person}, {answer_var})",
+            ] + mc2_frag.p_fragment
+            templates.append((q, query, answer_var, subtype))
+
+    return templates
 
 
 def _build_comparison_templates(

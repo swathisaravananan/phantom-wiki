@@ -28,8 +28,11 @@ from .facts.inverse_relations import register_inverse_predicates
 from .facts.sample import RELATION, prewarm_inverse_cache, sample_question
 from .facts.templates import (
     ALL_QUESTION_TYPES,
+    COMPARISON_AGE_MC2_SUBTYPE,
     COMPARISON_AGE_SUBTYPE,
+    COMPARISON_AGE_YOUNGER_MC2_SUBTYPE,
     COMPARISON_AGE_YOUNGER_SUBTYPE,
+    COMPARISON_BORN_FIRST_MC2_SUBTYPE,
     COMPARISON_BORN_FIRST_SUBTYPE,
     COMPARISON_COUNT_FEWER_SUBTYPE,
     COMPARISON_COUNT_MORE_SUBTYPE,
@@ -71,7 +74,9 @@ def _get_extended_cfg_answer(
     # If query succeeds, left operand wins. If fails, right operand wins.
     if question_subtype in (
         COMPARISON_AGE_SUBTYPE,
+        COMPARISON_AGE_MC2_SUBTYPE,
         COMPARISON_BORN_FIRST_SUBTYPE,
+        COMPARISON_BORN_FIRST_MC2_SUBTYPE,
         COMPARISON_COUNT_MORE_SUBTYPE,
     ):
         results = list(db.prolog.query(joined))
@@ -97,7 +102,7 @@ def _get_extended_cfg_answer(
             m = re.match(r'.+ or (.+?)\?', question)
             return [m.group(1)] if m else []
 
-    elif question_subtype in (COMPARISON_AGE_YOUNGER_SUBTYPE, COMPARISON_COUNT_FEWER_SUBTYPE):
+    elif question_subtype in (COMPARISON_AGE_YOUNGER_SUBTYPE, COMPARISON_AGE_YOUNGER_MC2_SUBTYPE, COMPARISON_COUNT_FEWER_SUBTYPE):
         # "younger" / "fewer" — query has @< / >, so if it succeeds, left has EARLIER dob / MORE count.
         # For "younger": left born earlier means left is OLDER, so right is younger (the answer).
         # For "fewer": left has more, so right has fewer (the answer).
