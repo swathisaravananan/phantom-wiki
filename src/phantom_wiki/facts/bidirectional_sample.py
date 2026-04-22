@@ -683,6 +683,7 @@ def sample_question_bidirectional(
     anchor_strategy: str = "random",
     answer_position: str = "head",
     _balanced_counter: list[int] | None = None,
+    difficulty_level: str | None = None,
 ) -> tuple[str, list[str], dict] | None:
     """Sample a question using bidirectional anchor placement.
 
@@ -711,7 +712,11 @@ def sample_question_bidirectional(
         Tuple of (question_string, query_list, sampling_metadata) or None if
         all attempts fail.
     """
-    relation_bank = RELATION_EASY if easy_mode else RELATION
+    if difficulty_level is not None:
+        from .sample import get_relation_bank
+        relation_bank = get_relation_bank(difficulty_level)
+    else:
+        relation_bank = RELATION_EASY if easy_mode else RELATION
 
     # 1. Parse all template steps
     steps = [_parse_step(item) for item in query_template]

@@ -178,3 +178,10 @@ question_parser.add_argument(
     choices=["head", "tail", "random"],
     help="Position of the answer in the relation chain (default: head)",
 )
+question_parser.add_argument(
+    "--difficulty-level",
+    type=str,
+    default=None,
+    choices=["trivial", "easy", "medium", "hard", "extreme"],
+    help="Only generate questions at this difficulty level (filters templates before sampling)",
+)

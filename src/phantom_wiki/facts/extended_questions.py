@@ -27,7 +27,7 @@ from .friends.constants import (
     FRIENDSHIP_RELATION_ALIAS,
     FRIENDSHIP_RELATION_PLURAL_ALIAS,
 )
-from .sample import RELATION, RELATION_ALIAS, RELATION_EASY, RELATION_PLURAL_ALIAS, get_vals_and_update_cache
+from .sample import RELATION, RELATION_ALIAS, RELATION_EASY, RELATION_PLURAL_ALIAS, get_relation_bank, get_vals_and_update_cache
 
 # ---------------------------------------------------------------------------
 # Question type identifiers
@@ -120,6 +120,7 @@ def sample_comparison_count_question(
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
+    difficulty_level: str | None = None,
 ) -> tuple[str, list[str]] | None:
     """Sample: 'Who has more <relation_plural>, <name_1> or <name_2>?'
 
@@ -128,7 +129,10 @@ def sample_comparison_count_question(
         aggregate_all(count, distinct(<relation>("<name_2>", Y)), C2),
         C1 > C2
     """
-    relation_bank = RELATION_EASY if easy_mode else RELATION
+    if difficulty_level is not None:
+        relation_bank = get_relation_bank(difficulty_level)
+    else:
+        relation_bank = RELATION_EASY if easy_mode else RELATION
 
     for _ in range(num_sampling_attempts):
         if len(person_name_bank) < 2:
@@ -223,6 +227,7 @@ def sample_superlative_age_question(
     easy_mode: bool = False,
     oldest: bool = True,
     num_sampling_attempts: int = 100,
+    difficulty_level: str | None = None,
 ) -> tuple[str, list[str]] | None:
     """Sample: 'Who is the oldest/youngest <relation> of <name>?'
 
@@ -231,7 +236,10 @@ def sample_superlative_age_question(
         \\+ (<relation>("<name>", Y), dob(Y, D2), Y \\= X, D2 @< D)
     The negation ensures no other relative has an earlier DOB (i.e., X has the earliest = oldest).
     """
-    relation_bank = RELATION_EASY if easy_mode else RELATION
+    if difficulty_level is not None:
+        relation_bank = get_relation_bank(difficulty_level)
+    else:
+        relation_bank = RELATION_EASY if easy_mode else RELATION
 
     for _ in range(num_sampling_attempts):
         person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
@@ -268,6 +276,7 @@ def sample_superlative_most_question(
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
+    difficulty_level: str | None = None,
 ) -> tuple[str, list[str]] | None:
     """Sample: 'Who has the most <relation_plural> among the <relation_plural_2> of <name>?'
 
@@ -279,7 +288,10 @@ def sample_superlative_most_question(
         \\+ (<relation_2>("<name>", Y), Y \\= X,
              aggregate_all(count, distinct(<relation_1>(Y, W)), C2), C2 > C)
     """
-    relation_bank = RELATION_EASY if easy_mode else RELATION
+    if difficulty_level is not None:
+        relation_bank = get_relation_bank(difficulty_level)
+    else:
+        relation_bank = RELATION_EASY if easy_mode else RELATION
 
     for _ in range(num_sampling_attempts):
         person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
@@ -337,6 +349,7 @@ def sample_extended_question(
     num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
+    difficulty_level: str | None = None,
 ) -> tuple[str, list[str]] | None:
     """Sample an extended question of the given type.
 
@@ -348,7 +361,8 @@ def sample_extended_question(
         )
     elif question_type == COMPARISON_COUNT_TYPE:
         return sample_comparison_count_question(
-            rng, db, person_name_bank, person_name2relation_and_related, easy_mode, num_sampling_attempts
+            rng, db, person_name_bank, person_name2relation_and_related,
+            easy_mode, num_sampling_attempts, difficulty_level=difficulty_level,
         )
     elif question_type == MULTI_CONSTRAINT_TYPE:
         return sample_multi_constraint_question(
@@ -356,21 +370,18 @@ def sample_extended_question(
         )
     elif question_type == SUPERLATIVE_OLDEST_TYPE:
         return sample_superlative_age_question(
-            rng, db, person_name_bank, person_name2relation_and_related, easy_mode, True, num_sampling_attempts
+            rng, db, person_name_bank, person_name2relation_and_related,
+            easy_mode, True, num_sampling_attempts, difficulty_level=difficulty_level,
         )
     elif question_type == SUPERLATIVE_YOUNGEST_TYPE:
         return sample_superlative_age_question(
-            rng,
-            db,
-            person_name_bank,
-            person_name2relation_and_related,
-            easy_mode,
-            False,
-            num_sampling_attempts,
+            rng, db, person_name_bank, person_name2relation_and_related,
+            easy_mode, False, num_sampling_attempts, difficulty_level=difficulty_level,
         )
     elif question_type == SUPERLATIVE_MOST_TYPE:
         return sample_superlative_most_question(
-            rng, db, person_name_bank, person_name2relation_and_related, easy_mode, num_sampling_attempts
+            rng, db, person_name_bank, person_name2relation_and_related,
+            easy_mode, num_sampling_attempts, difficulty_level=difficulty_level,
         )
     else:
         raise ValueError(f"Unknown extended question type: {question_type}")

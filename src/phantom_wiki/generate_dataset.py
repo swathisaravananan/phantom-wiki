@@ -215,6 +215,7 @@ def generate_dataset(
     sampling_method: str = "backward",
     anchor_strategy: str = "random",
     answer_position: str = "head",
+    difficulty_level: str = None,
 ) -> None:
     """
     Generate a PhantomWiki dataset consisting of family trees, friendship networks,
@@ -382,6 +383,9 @@ def generate_dataset(
     base_templates = [t for t in templates if len(t) == 3]
     extended_cfg_templates = [t for t in templates if len(t) == 4]
 
+    if difficulty_level is not None:
+        blue(f"Generating only '{difficulty_level}' difficulty questions (relation bank filter)")
+
     # sample questions for each template (i.e., type)
     if question_format == "json_by_type":
         question_dir = os.path.join(output_dir, "questions")
@@ -430,13 +434,13 @@ def generate_dataset(
         queries = []
         metadata_list = []
 
-        # for _ in range(args.num_questions_per_type):
-        while (
-            len(questions)
-            < num_questions_per_type
-            # TODO: handle potential edge cases where templates repeatedly fail to generate,
-            # resulting in an infinite loop
-        ):  # TODO: temporary fix to make sure that we generate the same number of questions for each template
+        # Cap total sampling attempts to avoid infinite loops when
+        # difficulty filtering rejects most samples for a template.
+        max_total_attempts = num_questions_per_type * num_sampling_attempts
+        total_attempts = 0
+
+        while len(questions) < num_questions_per_type and total_attempts < max_total_attempts:
+            total_attempts += 1
             if sampling_method == "bidirectional" and inverse_map is not None:
                 result = sample_question_bidirectional(
                     question_template,
@@ -454,15 +458,13 @@ def generate_dataset(
                     anchor_strategy=anchor_strategy,
                     answer_position=answer_position,
                     _balanced_counter=balanced_counter,
+                    difficulty_level=difficulty_level,
                 )
                 if result is not None:
                     question, query, metadata = result
-                    questions.append(question)
-                    queries.append(query)
-                    metadata_list.append(metadata)
                 else:
                     # Bidirectional failed — fall back to backward sampling
-                    question, query = sample_question(
+                    fallback = sample_question(
                         question_template,
                         query_template,
                         rng,
@@ -473,13 +475,15 @@ def generate_dataset(
                         num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=num_sampling_attempts,
+                        difficulty_level=difficulty_level,
                     )
-                    questions.append(question)
-                    queries.append(query)
-                    metadata_list.append({"method": "backward_fallback"})
+                    if fallback is None:
+                        continue
+                    question, query = fallback
+                    metadata = {"method": "backward_fallback"}
             else:
                 # Default backward sampling
-                question, query = sample_question(
+                fallback = sample_question(
                     question_template,
                     query_template,
                     rng,
@@ -490,10 +494,22 @@ def generate_dataset(
                     num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
+                    difficulty_level=difficulty_level,
                 )
-                questions.append(question)
-                queries.append(query)
-                metadata_list.append(None)
+                if fallback is None:
+                    continue
+                question, query = fallback
+                metadata = None
+
+            questions.append(question)
+            queries.append(query)
+            metadata_list.append(metadata)
+
+        if len(questions) < num_questions_per_type:
+            logging.warning(
+                f"Template {i}: only generated {len(questions)}/{num_questions_per_type} "
+                f"questions matching difficulty '{difficulty_level}'"
+            )
 
         all_questions.append(questions)
         all_queries.append(queries)
@@ -525,6 +541,7 @@ def generate_dataset(
                         num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=1,
+                        difficulty_level=difficulty_level,
                     )
                     if result is not None:
                         question, query = result
@@ -579,6 +596,7 @@ def generate_dataset(
                     num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
+                    difficulty_level=difficulty_level,
                 )
                 if result is not None:
                     question, query = result
@@ -621,7 +639,7 @@ def generate_dataset(
     for i, (question_template, query_template, answer) in progbar:
         questions = []
 
-        for j in range(num_questions_per_type):
+        for j in range(len(all_questions[i])):
             question = all_questions[i][j]
             query = all_queries[i][j]
             diff = _build_difficulty_fields(query)
