@@ -514,13 +514,16 @@ def _process_step_inverse(
             # y is known, find <name>
             person_name = atom_assignments[query_assignments[y]]
 
-            inverse_relations = get_inverse_vals_and_update_cache(
-                cache=person_name2inverse_relation,
-                key=person_name,
-                db=db,
-                query_bank=relation_bank,
-                num_procs=num_procs,
-            )
+            inverse_relations = [
+                (r, p) for r, p in get_inverse_vals_and_update_cache(
+                    cache=person_name2inverse_relation,
+                    key=person_name,
+                    db=db,
+                    query_bank=relation_bank,
+                    num_procs=num_procs,
+                )
+                if r in relation_bank
+            ]
             if not inverse_relations:
                 return False
 
@@ -535,13 +538,16 @@ def _process_step_inverse(
             # y2 is known, find y1
             person_name = atom_assignments[query_assignments[y2]]
 
-            inverse_relations = get_inverse_vals_and_update_cache(
-                cache=person_name2inverse_relation,
-                key=person_name,
-                db=db,
-                query_bank=relation_bank,
-                num_procs=num_procs,
-            )
+            inverse_relations = [
+                (r, p) for r, p in get_inverse_vals_and_update_cache(
+                    cache=person_name2inverse_relation,
+                    key=person_name,
+                    db=db,
+                    query_bank=relation_bank,
+                    num_procs=num_procs,
+                )
+                if r in relation_bank
+            ]
             if not inverse_relations:
                 return False
 
