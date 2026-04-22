@@ -8,8 +8,7 @@ Decomposes difficulty into two independent axes:
 - **constraints**: number of attribute-filter predicates (``hobby``, ``job``,
   ``dob``) that appear in the query.
 
-A scalar **composite** (hops + constraints) is provided for simple sorting,
-and a categorical **level** maps composite ranges to human labels.
+A scalar **composite** (hops + constraints) is provided for simple sorting.
 """
 
 from __future__ import annotations
@@ -54,27 +53,6 @@ SEMANTIC_BASE_FACTS = frozenset(
 
 # Predicates that are gender filters, not relational hops
 GENDER_FILTERS = frozenset(["male", "female", "nonbinary", "gender"])
-
-# Composite → level mapping
-LEVEL_RANGES: list[tuple[str, int, int | None]] = [
-    ("trivial", 1, 2),
-    ("easy", 3, 4),
-    ("medium", 5, 7),
-    ("hard", 8, 11),
-    ("extreme", 12, None),
-]
-
-
-def composite_to_level(composite: int) -> str:
-    """Map a composite score to a difficulty level name."""
-    for name, low, high in LEVEL_RANGES:
-        if high is None:
-            if composite >= low:
-                return name
-        elif low <= composite <= high:
-            return name
-    return "extreme"
-
 
 # ---------------------------------------------------------------------------
 # Prolog rule parser — auto-derives hop counts from .pl files
@@ -433,7 +411,7 @@ def compute_difficulty(query_template: list[str]) -> dict:
             ``generate_templates()`` or sampled questions.
 
     Returns:
-        Dict with keys ``hops``, ``constraints``, ``composite``, ``level``.
+        Dict with keys ``hops``, ``constraints``, ``composite``.
     """
     hop_counts = derive_relation_hop_counts()
 
@@ -447,12 +425,8 @@ def compute_difficulty(query_template: list[str]) -> dict:
     else:
         hops, constraints = _score_atoms(query_template, hop_counts)
 
-    composite = hops + constraints
-    level = composite_to_level(composite) if composite > 0 else "trivial"
-
     return {
         "hops": hops,
         "constraints": constraints,
-        "composite": composite,
-        "level": level,
+        "composite": hops + constraints,
     }

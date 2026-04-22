@@ -41,7 +41,6 @@ def _check_file(path: Path) -> list[dict]:
             recomputed["hops"] != stored.get("hops")
             or recomputed["constraints"] != stored.get("constraints")
             or recomputed["composite"] != stored.get("composite")
-            or recomputed["level"] != stored.get("level")
         ):
             mismatches.append(
                 {

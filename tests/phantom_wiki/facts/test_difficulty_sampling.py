@@ -1,11 +1,9 @@
-"""Tests for difficulty-level-based sampling (sample_questions / describe_pool)."""
+"""Tests for step-range-based sampling (sample_questions / describe_pool)."""
 
 import pytest
 
 from phantom_wiki.facts.balanced_sampling import (
-    DIFFICULTY_LEVELS,
     _classify_broad_type,
-    _get_difficulty_level,
     _matches_step_range,
     describe_pool,
     sample_questions,
@@ -31,69 +29,6 @@ def _make_questions(
         }
         for i, d in enumerate(difficulties)
     ]
-
-
-# ---------------------------------------------------------------------------
-# DIFFICULTY_LEVELS config
-# ---------------------------------------------------------------------------
-class TestDifficultyLevels:
-    def test_levels_are_non_overlapping(self):
-        """Ranges must not overlap."""
-        ranges = []
-        for level, (lo, hi) in DIFFICULTY_LEVELS.items():
-            if hi is None:
-                hi = 999
-            ranges.append((lo, hi, level))
-        ranges.sort()
-        for i in range(len(ranges) - 1):
-            assert ranges[i][1] < ranges[i + 1][0], (
-                f"Overlap between {ranges[i][2]} and {ranges[i+1][2]}"
-            )
-
-    def test_levels_cover_expected_keys(self):
-        assert set(DIFFICULTY_LEVELS.keys()) == {
-            "trivial", "easy", "medium", "hard", "extreme",
-        }
-
-    def test_trivial_range(self):
-        assert DIFFICULTY_LEVELS["trivial"] == (1, 2)
-
-    def test_easy_range(self):
-        assert DIFFICULTY_LEVELS["easy"] == (3, 4)
-
-    def test_medium_range(self):
-        assert DIFFICULTY_LEVELS["medium"] == (5, 7)
-
-    def test_hard_range(self):
-        assert DIFFICULTY_LEVELS["hard"] == (8, 11)
-
-    def test_extreme_range(self):
-        assert DIFFICULTY_LEVELS["extreme"] == (12, None)
-
-
-# ---------------------------------------------------------------------------
-# _get_difficulty_level
-# ---------------------------------------------------------------------------
-class TestGetDifficultyLevel:
-    def test_trivial(self):
-        assert _get_difficulty_level(1) == "trivial"
-        assert _get_difficulty_level(2) == "trivial"
-
-    def test_easy(self):
-        assert _get_difficulty_level(3) == "easy"
-        assert _get_difficulty_level(4) == "easy"
-
-    def test_medium(self):
-        assert _get_difficulty_level(5) == "medium"
-        assert _get_difficulty_level(7) == "medium"
-
-    def test_hard(self):
-        assert _get_difficulty_level(8) == "hard"
-        assert _get_difficulty_level(11) == "hard"
-
-    def test_extreme(self):
-        assert _get_difficulty_level(12) == "extreme"
-        assert _get_difficulty_level(100) == "extreme"
 
 
 # ---------------------------------------------------------------------------
@@ -153,28 +88,11 @@ class TestSampleQuestions:
         result = sample_questions(questions, count=3)
         assert len(result) == 3
 
-    def test_filter_by_difficulty_level(self):
-        # trivial=1-2, easy=3-4, medium=5-7
-        questions = _make_questions([1, 2, 3, 4, 5, 6, 7])
-        result = sample_questions(questions, count=3, difficulty="medium")
-        assert len(result) == 3
-        assert all(5 <= q["difficulty"] <= 7 for q in result)
-
     def test_filter_by_min_max_steps(self):
         questions = _make_questions([1, 2, 3, 4, 5, 6, 7, 8])
         result = sample_questions(questions, count=2, min_steps=3, max_steps=5)
         assert len(result) == 2
         assert all(3 <= q["difficulty"] <= 5 for q in result)
-
-    def test_mutual_exclusion_difficulty_and_steps(self):
-        questions = _make_questions([1, 2, 3])
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            sample_questions(questions, count=1, difficulty="easy", min_steps=1)
-
-    def test_mutual_exclusion_difficulty_and_max_steps(self):
-        questions = _make_questions([1, 2, 3])
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            sample_questions(questions, count=1, difficulty="easy", max_steps=5)
 
     def test_insufficient_pool_raises(self):
         questions = _make_questions([1, 2])
@@ -184,7 +102,7 @@ class TestSampleQuestions:
     def test_insufficient_pool_with_filters(self):
         questions = _make_questions([1, 2, 5, 6])
         with pytest.raises(ValueError, match="only 2 match"):
-            sample_questions(questions, count=3, difficulty="medium")
+            sample_questions(questions, count=3, min_steps=5, max_steps=7)
 
     def test_filter_by_question_types_insufficient(self):
         categories = ["base", "comparison_age", "superlative_oldest", "base"]
@@ -220,16 +138,11 @@ class TestSampleQuestions:
         # Very unlikely to be the same
         assert [q["id"] for q in r1] != [q["id"] for q in r2]
 
-    def test_unknown_difficulty_level_raises(self):
-        questions = _make_questions([1, 2, 3])
-        with pytest.raises(ValueError, match="Unknown difficulty level"):
-            sample_questions(questions, count=1, difficulty="impossible")
-
-    def test_combined_difficulty_and_type_filter(self):
+    def test_combined_steps_and_type_filter(self):
         categories = ["base", "comparison_age", "base", "comparison_born"]
         questions = _make_questions([1, 5, 6, 7], categories=categories)
         result = sample_questions(
-            questions, count=1, difficulty="medium", question_types=["comparison"]
+            questions, count=1, min_steps=5, max_steps=7, question_types=["comparison"]
         )
         assert len(result) == 1
         assert 5 <= result[0]["difficulty"] <= 7
@@ -244,23 +157,26 @@ class TestDescribePool:
         questions = _make_questions([1, 5, 12])
         result = describe_pool(questions)
         assert "total" in result
-        assert "by_difficulty" in result
+        assert "by_composite" in result
         assert "by_type" in result
-        assert "by_difficulty_and_type" in result
+        assert "by_composite_and_type" in result
 
     def test_total_count(self):
         questions = _make_questions([1, 2, 3, 4, 5])
         result = describe_pool(questions)
         assert result["total"] == 5
 
-    def test_by_difficulty_counts(self):
-        questions = _make_questions([1, 2, 5, 6, 12])
+    def test_by_composite_counts(self):
+        questions = _make_questions([1, 1, 5, 5, 12])
         result = describe_pool(questions)
-        assert result["by_difficulty"]["trivial"] == 2
-        assert result["by_difficulty"]["medium"] == 2
-        assert result["by_difficulty"]["extreme"] == 1
-        assert result["by_difficulty"]["easy"] == 0
-        assert result["by_difficulty"]["hard"] == 0
+        assert result["by_composite"][1] == 2
+        assert result["by_composite"][5] == 2
+        assert result["by_composite"][12] == 1
+
+    def test_by_composite_sorted(self):
+        questions = _make_questions([12, 1, 5])
+        result = describe_pool(questions)
+        assert list(result["by_composite"].keys()) == [1, 5, 12]
 
     def test_by_type_counts(self):
         categories = ["base", "comparison_age", "comparison_born", "superlative_oldest"]
@@ -270,20 +186,16 @@ class TestDescribePool:
         assert result["by_type"]["comparison"] == 2
         assert result["by_type"]["superlative"] == 1
 
-    def test_by_difficulty_and_type(self):
+    def test_by_composite_and_type(self):
         categories = ["base", "comparison_age"]
         questions = _make_questions([1, 5], categories=categories)
         result = describe_pool(questions)
-        assert result["by_difficulty_and_type"]["trivial"]["base"] == 1
-        assert result["by_difficulty_and_type"]["medium"]["comparison"] == 1
+        assert result["by_composite_and_type"][1]["base"] == 1
+        assert result["by_composite_and_type"][5]["comparison"] == 1
 
     def test_empty_pool(self):
         result = describe_pool([])
         assert result["total"] == 0
-        assert all(v == 0 for v in result["by_difficulty"].values())
+        assert result["by_composite"] == {}
         assert result["by_type"] == {}
-
-    def test_all_difficulty_levels_present(self):
-        result = describe_pool([])
-        assert set(result["by_difficulty"].keys()) == set(DIFFICULTY_LEVELS.keys())
-        assert set(result["by_difficulty_and_type"].keys()) == set(DIFFICULTY_LEVELS.keys())
+        assert result["by_composite_and_type"] == {}

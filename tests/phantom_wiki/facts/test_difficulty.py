@@ -6,10 +6,8 @@ import os
 import pytest
 
 from phantom_wiki.facts.difficulty import (
-    LEVEL_RANGES,
     _load_all_rules,
     _parse_rules_from_file,
-    composite_to_level,
     compute_difficulty,
     derive_relation_hop_counts,
 )
@@ -183,7 +181,6 @@ class TestComputeDifficulty:
         assert d["hops"] == 3
         assert d["constraints"] == 2
         assert d["composite"] == 5
-        assert d["level"] == "medium"
 
     def test_aggregation_query(self):
         query = ['aggregate_all(count, distinct(child("Alice", Y_2)), Count_3)']
@@ -209,7 +206,6 @@ class TestComputeDifficulty:
         assert d["hops"] == 0
         assert d["constraints"] == 0
         assert d["composite"] == 0
-        assert d["level"] == "trivial"
 
     def test_hops_plus_constraints_equals_composite(self):
         queries = [
@@ -220,28 +216,6 @@ class TestComputeDifficulty:
         for q in queries:
             d = compute_difficulty(q)
             assert d["hops"] + d["constraints"] == d["composite"]
-
-
-class TestLevelMapping:
-    def test_trivial(self):
-        assert composite_to_level(1) == "trivial"
-        assert composite_to_level(2) == "trivial"
-
-    def test_easy(self):
-        assert composite_to_level(3) == "easy"
-        assert composite_to_level(4) == "easy"
-
-    def test_medium(self):
-        assert composite_to_level(5) == "medium"
-        assert composite_to_level(7) == "medium"
-
-    def test_hard(self):
-        assert composite_to_level(8) == "hard"
-        assert composite_to_level(11) == "hard"
-
-    def test_extreme(self):
-        assert composite_to_level(12) == "extreme"
-        assert composite_to_level(20) == "extreme"
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +255,7 @@ class TestOutputSchema:
             assert isinstance(q["difficulty"], dict), f"Expected dict, got {type(q['difficulty'])}"
 
     def test_difficulty_has_all_fields(self):
-        required = {"hops", "constraints", "composite", "level"}
+        required = {"hops", "constraints", "composite"}
         for q in self._questions:
             assert required.issubset(set(q["difficulty"].keys()))
 
@@ -289,11 +263,6 @@ class TestOutputSchema:
         for q in self._questions:
             d = q["difficulty"]
             assert d["composite"] == d["hops"] + d["constraints"]
-
-    def test_level_is_valid(self):
-        valid_levels = {name for name, _, _ in LEVEL_RANGES}
-        for q in self._questions:
-            assert q["difficulty"]["level"] in valid_levels
 
     def test_hops_positive_for_relation_questions(self):
         for q in self._questions:
@@ -423,7 +392,6 @@ class TestGroundTruthQuestions:
         assert result["hops"] == 3, f"Expected 3 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
         assert result["composite"] == 4
-        assert result["level"] == "easy"
 
     def test_full_question_5_ground_truth(self):
         query = [
@@ -438,7 +406,6 @@ class TestGroundTruthQuestions:
         assert result["hops"] == 4, f"Expected 4 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
         assert result["composite"] == 5
-        assert result["level"] == "medium"
 
     def test_full_question_6_ground_truth(self):
         query = [
@@ -453,4 +420,3 @@ class TestGroundTruthQuestions:
         assert result["hops"] == 6, f"Expected 6 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
         assert result["composite"] == 7
-        assert result["level"] == "medium"

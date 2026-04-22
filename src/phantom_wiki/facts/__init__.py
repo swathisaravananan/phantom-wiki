@@ -115,36 +115,22 @@ question_parser.add_argument(
     help="Filter questions to maximum constraint count (inclusive)",
 )
 question_parser.add_argument(
-    "--sample-difficulty-level",
-    type=str,
-    default=None,
-    choices=["trivial", "easy", "medium", "hard", "extreme"],
-    help="Filter questions by structured difficulty level before other filters",
-)
-question_parser.add_argument(
     "--sample-count",
     type=int,
     default=None,
     help="Exact number of questions to sample from the generated pool",
 )
 question_parser.add_argument(
-    "--sample-difficulty",
-    type=str,
-    default=None,
-    choices=["trivial", "easy", "medium", "hard", "extreme"],
-    help="Named difficulty level to filter before sampling (mutually exclusive with --sample-min-steps/--sample-max-steps)",
-)
-question_parser.add_argument(
     "--sample-min-steps",
     type=int,
     default=None,
-    help="Minimum reasoning steps for sampling filter (inclusive, mutually exclusive with --sample-difficulty)",
+    help="Minimum reasoning steps for sampling filter (inclusive)",
 )
 question_parser.add_argument(
     "--sample-max-steps",
     type=int,
     default=None,
-    help="Maximum reasoning steps for sampling filter (inclusive, mutually exclusive with --sample-difficulty)",
+    help="Maximum reasoning steps for sampling filter (inclusive)",
 )
 question_parser.add_argument(
     "--sample-types",

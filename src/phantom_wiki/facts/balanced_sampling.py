@@ -9,13 +9,6 @@ Difficulty buckets:
     - hard:       7-9 steps
     - very_hard:  10-12 steps
     - extreme:    13+ steps
-
-Difficulty levels (for --sample-difficulty):
-    - trivial:    1-2 steps
-    - easy:       3-4 steps
-    - medium:     5-7 steps
-    - hard:       8-11 steps
-    - extreme:    12+ steps
 """
 
 import logging
@@ -198,24 +191,8 @@ def filter_by_difficulty(
 
 
 # ---------------------------------------------------------------------------
-# Difficulty-level-based sampling (--sample-count / --sample-difficulty)
+# Step-range-based sampling (--sample-count with numeric min/max filters)
 # ---------------------------------------------------------------------------
-
-DIFFICULTY_LEVELS = {
-    "trivial": (1, 2),
-    "easy": (3, 4),
-    "medium": (5, 7),
-    "hard": (8, 11),
-    "extreme": (12, None),  # None means no upper bound
-}
-
-
-def _difficulty_level_range(level: str) -> tuple[int, int | None]:
-    """Return (min_steps, max_steps) for a named difficulty level."""
-    if level not in DIFFICULTY_LEVELS:
-        valid = ", ".join(DIFFICULTY_LEVELS.keys())
-        raise ValueError(f"Unknown difficulty level {level!r}. Valid levels: {valid}")
-    return DIFFICULTY_LEVELS[level]
 
 
 def _matches_step_range(
@@ -234,27 +211,20 @@ def _matches_step_range(
 def sample_questions(
     questions: list[dict],
     count: int,
-    difficulty: str | None = None,
     question_types: list[str] | None = None,
     min_steps: int | None = None,
     max_steps: int | None = None,
     seed: int = 42,
 ) -> list[dict]:
-    """Sample an exact number of questions, optionally filtered by difficulty and type.
+    """Sample an exact number of questions, optionally filtered by step range and type.
 
     Filtering is applied first to build a pool, then ``count`` questions are
     drawn uniformly at random (without replacement) from that pool.
-
-    The ``difficulty`` parameter is a convenience shorthand that maps to a
-    ``(min_steps, max_steps)`` range via :data:`DIFFICULTY_LEVELS`.  It is
-    mutually exclusive with explicit ``min_steps`` / ``max_steps``.
 
     Args:
         questions: Full list of question dicts (must have ``difficulty`` field,
             and optionally ``question_category``).
         count: Exact number of questions to return.
-        difficulty: Named difficulty level (e.g. ``"medium"``).  Mutually
-            exclusive with ``min_steps`` / ``max_steps``.
         question_types: If given, only include questions whose
             ``question_category`` contains one of these strings.
         min_steps: Minimum reasoning steps (inclusive).
@@ -265,18 +235,8 @@ def sample_questions(
         List of ``count`` question dicts.
 
     Raises:
-        ValueError: If ``difficulty`` is used together with ``min_steps`` /
-            ``max_steps``, or if the filtered pool is smaller than ``count``.
+        ValueError: If the filtered pool is smaller than ``count``.
     """
-    # Resolve difficulty level to step range
-    if difficulty is not None:
-        if min_steps is not None or max_steps is not None:
-            raise ValueError(
-                "Cannot specify both 'difficulty' and 'min_steps'/'max_steps'. "
-                "Use one or the other."
-            )
-        min_steps, max_steps = _difficulty_level_range(difficulty)
-
     # Build filtered pool
     pool: list[dict] = []
     for q in questions:
@@ -298,9 +258,8 @@ def sample_questions(
     if len(pool) < count:
         raise ValueError(
             f"Requested {count} questions but only {len(pool)} match the filters "
-            f"(difficulty={difficulty!r}, min_steps={min_steps}, "
-            f"max_steps={max_steps}, question_types={question_types}). "
-            f"Reduce count or loosen filters."
+            f"(min_steps={min_steps}, max_steps={max_steps}, "
+            f"question_types={question_types}). Reduce count or loosen filters."
         )
 
     # Sample
@@ -312,14 +271,13 @@ def sample_questions(
 
     logger.info(
         f"Sampled {count} questions (pool size {len(pool)}, "
-        f"difficulty={difficulty!r}, steps=[{min_steps}, {max_steps}], "
-        f"types={question_types})"
+        f"steps=[{min_steps}, {max_steps}], types={question_types})"
     )
     return sampled
 
 
 def describe_pool(questions: list[dict]) -> dict:
-    """Compute a breakdown of the question pool by difficulty and type.
+    """Compute a breakdown of the question pool by composite difficulty and type.
 
     Args:
         questions: Full list of question dicts with ``difficulty`` and
@@ -329,47 +287,30 @@ def describe_pool(questions: list[dict]) -> dict:
         Dictionary with keys:
 
         - ``total``: Total number of questions.
-        - ``by_difficulty``: ``{level_name: count}`` for each
-          :data:`DIFFICULTY_LEVELS` level.
+        - ``by_composite``: ``{composite_int: count}``.
         - ``by_type``: ``{type_name: count}`` where type is derived from
           ``question_category``.
-        - ``by_difficulty_and_type``: ``{level_name: {type_name: count}}``.
+        - ``by_composite_and_type``: ``{composite_int: {type_name: count}}``.
     """
-    by_difficulty: dict[str, int] = {level: 0 for level in DIFFICULTY_LEVELS}
+    by_composite: dict[int, int] = defaultdict(int)
     by_type: dict[str, int] = defaultdict(int)
-    by_both: dict[str, dict[str, int]] = {level: defaultdict(int) for level in DIFFICULTY_LEVELS}
+    by_both: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for q in questions:
         d = _extract_composite(q["difficulty"])
         cat = q.get("question_category", "")
-
-        # Determine difficulty level
-        level = _get_difficulty_level(d)
-
-        # Determine question type
         qtype = _classify_broad_type(cat)
 
-        by_difficulty[level] += 1
+        by_composite[d] += 1
         by_type[qtype] += 1
-        by_both[level][qtype] += 1
+        by_both[d][qtype] += 1
 
     return {
         "total": len(questions),
-        "by_difficulty": by_difficulty,
+        "by_composite": dict(sorted(by_composite.items())),
         "by_type": dict(by_type),
-        "by_difficulty_and_type": {k: dict(v) for k, v in by_both.items()},
+        "by_composite_and_type": {k: dict(v) for k, v in sorted(by_both.items())},
     }
-
-
-def _get_difficulty_level(difficulty: int) -> str:
-    """Map a difficulty (reasoning steps) value to a DIFFICULTY_LEVELS name."""
-    for level_name, (low, high) in DIFFICULTY_LEVELS.items():
-        if high is None:
-            if difficulty >= low:
-                return level_name
-        elif low <= difficulty <= high:
-            return level_name
-    return "extreme"  # fallback
 
 
 def _classify_broad_type(question_category: str) -> str:

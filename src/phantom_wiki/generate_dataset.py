@@ -144,16 +144,6 @@ def _filter_by_constraints(questions: list[dict], min_constraints: int = None, m
     return filtered
 
 
-def _filter_by_level(questions: list[dict], level: str) -> list[dict]:
-    """Filter questions by structured difficulty level."""
-    filtered = []
-    for q in questions:
-        diff = q.get("difficulty", {})
-        if isinstance(diff, dict) and diff.get("level") == level:
-            filtered.append(q)
-    return filtered
-
-
 def _filter_by_hops(questions: list[dict], min_hops: int = None, max_hops: int = None) -> list[dict]:
     """Filter questions by hop count from the structured difficulty field."""
     filtered = []
@@ -201,9 +191,7 @@ def generate_dataset(
     max_hops: int = None,
     min_constraints: int = None,
     max_constraints: int = None,
-    sample_difficulty_level: str = None,
     sample_count: int = None,
-    sample_difficulty: str = None,
     sample_min_steps: int = None,
     sample_max_steps: int = None,
     sample_types: str = None,
@@ -687,12 +675,6 @@ def generate_dataset(
         all_full_questions = _filter_by_constraints(all_full_questions, min_constraints, max_constraints)
         logging.info(f"After constraint filtering: {len(all_full_questions)} questions")
 
-    # Apply difficulty-level filtering
-    if sample_difficulty_level is not None:
-        blue(f"Filtering questions by difficulty level: {sample_difficulty_level}")
-        all_full_questions = _filter_by_level(all_full_questions, sample_difficulty_level)
-        logging.info(f"After level filtering: {len(all_full_questions)} questions")
-
     # Apply difficulty-based filtering and balanced sampling
     if min_difficulty is not None or max_difficulty is not None:
         blue("Filtering questions by difficulty range")
@@ -710,18 +692,18 @@ def generate_dataset(
         blue("Question Pool Breakdown")
         logging.info(f"Total questions: {pool_info['total']}")
         logging.info("")
-        logging.info("By difficulty level:")
-        for level, count in pool_info["by_difficulty"].items():
-            logging.info(f"  {level:>10s}: {count}")
+        logging.info("By composite difficulty:")
+        for composite, count in pool_info["by_composite"].items():
+            logging.info(f"  {composite:>4d}: {count}")
         logging.info("")
         logging.info("By question type:")
         for qtype, count in pool_info["by_type"].items():
             logging.info(f"  {qtype:>20s}: {count}")
         logging.info("")
-        logging.info("By difficulty and type:")
-        for level, type_counts in pool_info["by_difficulty_and_type"].items():
+        logging.info("By composite difficulty and type:")
+        for composite, type_counts in pool_info["by_composite_and_type"].items():
             if type_counts:
-                logging.info(f"  {level}:")
+                logging.info(f"  {composite}:")
                 for qtype, count in type_counts.items():
                     logging.info(f"    {qtype:>20s}: {count}")
         return
@@ -735,7 +717,6 @@ def generate_dataset(
         all_full_questions = sample_questions(
             all_full_questions,
             count=sample_count,
-            difficulty=sample_difficulty,
             question_types=parsed_sample_types,
             min_steps=sample_min_steps,
             max_steps=sample_max_steps,
