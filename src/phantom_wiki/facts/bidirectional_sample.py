@@ -399,15 +399,20 @@ def _process_step_inverse(
         # y2 (second arg) is known, we need to find y1 (first arg)
         person_name = atom_assignments[query_assignments[y2]]
 
-        # Inverse lookup: find people X where R(X, person_name)
-        inverse_relations = get_inverse_vals_and_update_cache(
-            cache=person_name2inverse_relation,
-            key=person_name,
-            db=db,
-            query_bank=relation_bank,
-            num_procs=num_procs,
-            inverse_map=inverse_map,
-        )
+        # Inverse lookup: find people X where R(X, person_name).
+        # The cache may have been prewarmed with the full relation bank, so filter
+        # results to only relations in relation_bank after the lookup.
+        inverse_relations = [
+            (r, p) for r, p in get_inverse_vals_and_update_cache(
+                cache=person_name2inverse_relation,
+                key=person_name,
+                db=db,
+                query_bank=relation_bank,
+                num_procs=num_procs,
+                inverse_map=inverse_map,
+            )
+            if r in relation_bank
+        ]
         if not inverse_relations:
             return False
 
@@ -422,14 +427,17 @@ def _process_step_inverse(
         # y (second arg) is known, we need to find <name> (first arg)
         person_name = atom_assignments[query_assignments[y]]
 
-        inverse_relations = get_inverse_vals_and_update_cache(
-            cache=person_name2inverse_relation,
-            key=person_name,
-            db=db,
-            query_bank=relation_bank,
-            num_procs=num_procs,
-            inverse_map=inverse_map,
-        )
+        inverse_relations = [
+            (r, p) for r, p in get_inverse_vals_and_update_cache(
+                cache=person_name2inverse_relation,
+                key=person_name,
+                db=db,
+                query_bank=relation_bank,
+                num_procs=num_procs,
+                inverse_map=inverse_map,
+            )
+            if r in relation_bank
+        ]
         if not inverse_relations:
             return False
 
