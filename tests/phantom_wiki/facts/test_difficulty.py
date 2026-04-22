@@ -198,7 +198,7 @@ class TestComputeDifficulty:
             'parent("Bob", Y_4)',
         ]
         d = compute_difficulty(query)
-        assert d["hops"] == 2  # friend(1) + parent(1)
+        assert d["hops"] == 1  # max(friend=1, parent=1)
         assert d["constraints"] == 0  # dob with variable args are not constraints
 
     def test_empty_query(self):
@@ -389,9 +389,9 @@ class TestGroundTruthQuestions:
             'niece("Jeannine Wexler", Y_8)',
         ]
         result = compute_difficulty(query)
-        assert result["hops"] == 3, f"Expected 3 hops, got {result['hops']}"
+        assert result["hops"] == 2, f"Expected 2 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
-        assert result["composite"] == 4
+        assert result["composite"] == 3
 
     def test_full_question_5_ground_truth(self):
         query = [
@@ -403,9 +403,9 @@ class TestGroundTruthQuestions:
             'great_aunt("Shelli Beltran", Y_8)',
         ]
         result = compute_difficulty(query)
-        assert result["hops"] == 4, f"Expected 4 hops, got {result['hops']}"
+        assert result["hops"] == 3, f"Expected 3 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
-        assert result["composite"] == 5
+        assert result["composite"] == 4
 
     def test_full_question_6_ground_truth(self):
         query = [
@@ -417,6 +417,6 @@ class TestGroundTruthQuestions:
             'sister_in_law("Dominique Smock", Y_8)',
         ]
         result = compute_difficulty(query)
-        assert result["hops"] == 6, f"Expected 6 hops, got {result['hops']}"
+        assert result["hops"] == 3, f"Expected 3 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
-        assert result["composite"] == 7
+        assert result["composite"] == 4
