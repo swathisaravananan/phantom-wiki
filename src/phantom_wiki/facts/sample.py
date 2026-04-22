@@ -43,34 +43,18 @@ def _all_placeholders_assigned(query_item: str, query_assignments: dict[str, str
 
 
 FAMILY_RELATION_EASY = [k for k, v in FAMILY_RELATION_DIFFICULTY.items() if v < 2]
-FAMILY_RELATION_MEDIUM = [k for k, v in FAMILY_RELATION_DIFFICULTY.items() if v <= 2]
-FAMILY_RELATION_HARD = [k for k, v in FAMILY_RELATION_DIFFICULTY.items() if v <= 3]
 FAMILY_RELATIONS = [k for k, v in FAMILY_RELATION_DIFFICULTY.items()]
 
 RELATION_ALIAS = FAMILY_RELATION_ALIAS | FRIENDSHIP_RELATION_ALIAS
 RELATION_PLURAL_ALIAS = FAMILY_RELATION_PLURAL_ALIAS | FRIENDSHIP_RELATION_PLURAL_ALIAS
 
 RELATION_EASY = FAMILY_RELATION_EASY + FRIENDSHIP_RELATION
-RELATION_MEDIUM = FAMILY_RELATION_MEDIUM + FRIENDSHIP_RELATION
-RELATION_HARD = FAMILY_RELATION_HARD + FRIENDSHIP_RELATION
 RELATION = FAMILY_RELATIONS + FRIENDSHIP_RELATION
 
-# Mapping from difficulty level name to relation bank
-RELATION_BANKS: dict[str | None, list[str]] = {
-    None: RELATION,
-    "easy": RELATION_EASY,
-    "medium": RELATION_MEDIUM,
-    "hard": RELATION_HARD,
-}
 
-
-def get_relation_bank(difficulty_level: str | None) -> list[str]:
-    """Return the relation bank for a given difficulty level.
-
-    Args:
-        difficulty_level: One of "easy", "medium", "hard", or None (all relations).
-    """
-    return RELATION_BANKS.get(difficulty_level, RELATION)
+def get_relation_bank(easy_mode: bool) -> list[str]:
+    """Return the relation bank to sample from."""
+    return RELATION_EASY if easy_mode else RELATION
 
 
 def get_vals_and_update_cache(
@@ -566,7 +550,6 @@ def sample_question(
     num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
-    difficulty_level: str | None = None,
 ) -> list[str, list[str]]:
     """
     Samples possible realizations of the question template and query template lists
@@ -608,10 +591,7 @@ def sample_question(
     )  # Maps placeholder Y_i to the temporary variable A_i (or sampled value in case of terminal question)
     question_assignments: dict[str, str] = {}
 
-    if difficulty_level is not None:
-        relation_bank = get_relation_bank(difficulty_level)
-    else:
-        relation_bank = RELATION_EASY if easy_mode else RELATION
+    relation_bank = get_relation_bank(easy_mode)
 
     valid_result = False
     n_attempts = 0
@@ -803,7 +783,6 @@ def sample_forward(
     rng: Generator,
     valid_only: bool = True,
     easy_mode: bool = False,
-    difficulty_level: str | None = None,
 ) -> tuple[str, list[str]]:
     """
     DEPRECATED: Use sample_question instead, which implements a (much faster) random walk over the universe
@@ -887,10 +866,7 @@ def sample_forward(
 
     valid_result = False
     n_attempts = 0
-    if difficulty_level is not None:
-        relation_bank = get_relation_bank(difficulty_level)
-    else:
-        relation_bank = RELATION_EASY if easy_mode else RELATION
+    relation_bank = get_relation_bank(easy_mode)
 
     while not valid_result and n_attempts < 100:  # TODO limit to 100 attempts per template for now
         n_attempts += 1

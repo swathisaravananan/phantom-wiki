@@ -199,7 +199,6 @@ def generate_dataset(
     sampling_method: str = "backward",
     anchor_strategy: str = "random",
     answer_position: str = "head",
-    difficulty_level: str = None,
 ) -> None:
     """
     Generate a PhantomWiki dataset consisting of family trees, friendship networks,
@@ -367,9 +366,6 @@ def generate_dataset(
     base_templates = [t for t in templates if len(t) == 3]
     extended_cfg_templates = [t for t in templates if len(t) == 4]
 
-    if difficulty_level is not None:
-        blue(f"Generating only '{difficulty_level}' difficulty questions (relation bank filter)")
-
     # sample questions for each template (i.e., type)
     if question_format == "json_by_type":
         question_dir = os.path.join(output_dir, "questions")
@@ -442,7 +438,6 @@ def generate_dataset(
                     anchor_strategy=anchor_strategy,
                     answer_position=answer_position,
                     _balanced_counter=balanced_counter,
-                    difficulty_level=difficulty_level,
                 )
                 if result is not None:
                     question, query, metadata = result
@@ -459,7 +454,6 @@ def generate_dataset(
                         num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=num_sampling_attempts,
-                        difficulty_level=difficulty_level,
                     )
                     if fallback is None:
                         continue
@@ -478,7 +472,6 @@ def generate_dataset(
                     num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
-                    difficulty_level=difficulty_level,
                 )
                 if fallback is None:
                     continue
@@ -491,8 +484,7 @@ def generate_dataset(
 
         if len(questions) < num_questions_per_type:
             logging.warning(
-                f"Template {i}: only generated {len(questions)}/{num_questions_per_type} "
-                f"questions matching difficulty '{difficulty_level}'"
+                f"Template {i}: only generated {len(questions)}/{num_questions_per_type} questions"
             )
 
         all_questions.append(questions)
@@ -525,7 +517,6 @@ def generate_dataset(
                         num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=1,
-                        difficulty_level=difficulty_level,
                     )
                     if result is not None:
                         question, query = result
@@ -578,7 +569,6 @@ def generate_dataset(
                     num_multiprocesses,
                     easy_mode=easy_mode,
                     num_sampling_attempts=num_sampling_attempts,
-                    difficulty_level=difficulty_level,
                 )
                 if result is not None:
                     question, query = result

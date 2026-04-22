@@ -21,12 +21,11 @@ from .friends.constants import (
     FRIENDSHIP_RELATION_PLURAL_ALIAS,
 )
 from .sample import (
-    RELATION,
     RELATION_ALIAS,
-    RELATION_EASY,
     RELATION_PLURAL_ALIAS,
     add_to_atom_assignments,
     get_inverse_vals_and_update_cache,
+    get_relation_bank,
     get_vals_and_update_cache,
 )
 
@@ -697,7 +696,6 @@ def sample_question_bidirectional(
     anchor_strategy: str = "random",
     answer_position: str = "head",
     _balanced_counter: list[int] | None = None,
-    difficulty_level: str | None = None,
 ) -> tuple[str, list[str], dict] | None:
     """Sample a question using bidirectional anchor placement.
 
@@ -726,11 +724,7 @@ def sample_question_bidirectional(
         Tuple of (question_string, query_list, sampling_metadata) or None if
         all attempts fail.
     """
-    if difficulty_level is not None:
-        from .sample import get_relation_bank
-        relation_bank = get_relation_bank(difficulty_level)
-    else:
-        relation_bank = RELATION_EASY if easy_mode else RELATION
+    relation_bank = get_relation_bank(easy_mode)
 
     # 1. Parse all template steps
     steps = [_parse_step(item) for item in query_template]
