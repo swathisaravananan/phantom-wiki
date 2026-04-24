@@ -263,11 +263,17 @@ def _is_quoted_literal(s: str) -> bool:
 
 
 _VARIABLE_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\b")
+_QUOTED_STR_RE = re.compile(r'"[^"]*"')
 
 
 def _extract_variables(atom: str) -> set[str]:
-    """Extract all Prolog variable names from an atom (uppercase-starting identifiers)."""
-    return set(_VARIABLE_RE.findall(atom)) - GENDER_FILTERS
+    """Extract all Prolog variable names from an atom (uppercase-starting identifiers).
+
+    Quoted string literals (e.g. person names like "Deane Smock") are stripped
+    first so their words are not mistaken for Prolog variables.
+    """
+    atom_no_strings = _QUOTED_STR_RE.sub("", atom)
+    return set(_VARIABLE_RE.findall(atom_no_strings)) - GENDER_FILTERS
 
 
 def _split_comparison_branches(query_template: list[str]) -> tuple[list[str], list[str]] | None:

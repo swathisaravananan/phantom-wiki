@@ -25,7 +25,8 @@ from .facts.difficulty import compute_difficulty
 from .facts.question_difficulty import calculate_query_difficulty
 from .facts.bidirectional_sample import sample_question_bidirectional
 from .facts.inverse_relations import register_inverse_predicates
-from .facts.sample import RELATION, prewarm_inverse_cache, sample_question
+from .facts.attributes.constants import ATTRIBUTE_TYPES
+from .facts.sample import RELATION, prewarm_forward_cache, prewarm_inverse_cache, sample_question
 from .facts.templates import (
     ALL_QUESTION_TYPES,
     COMPARISON_AGE_MC2_SUBTYPE,
@@ -34,8 +35,6 @@ from .facts.templates import (
     COMPARISON_AGE_YOUNGER_SUBTYPE,
     COMPARISON_BORN_FIRST_MC2_SUBTYPE,
     COMPARISON_BORN_FIRST_SUBTYPE,
-    COMPARISON_COUNT_FEWER_SUBTYPE,
-    COMPARISON_COUNT_MORE_SUBTYPE,
     QUESTION_TYPE_BASE,
     classify_question_type,
     generate_templates,
@@ -45,89 +44,110 @@ from .utils import blue, generate_unique_id
 from .utils.get_answer import get_answer
 
 
+def _build_difficulty_fields(query: list[str]) -> dict:
+    """Build both the structured difficulty dict and the legacy scalar."""
+    structured = compute_difficulty(query)
+    return {
+        "reasoning_steps": structured["hops"],
+        "difficulty": structured,
+    }
+
+
+_COMPARISON_OLDER_SUBTYPES = frozenset({
+    COMPARISON_AGE_SUBTYPE,
+    COMPARISON_AGE_MC2_SUBTYPE,
+    COMPARISON_BORN_FIRST_SUBTYPE,
+    COMPARISON_BORN_FIRST_MC2_SUBTYPE,
+})
+_COMPARISON_YOUNGER_SUBTYPES = frozenset({
+    COMPARISON_AGE_YOUNGER_SUBTYPE,
+    COMPARISON_AGE_YOUNGER_MC2_SUBTYPE,
+})
+_COMPARISON_SUBTYPES = _COMPARISON_OLDER_SUBTYPES | _COMPARISON_YOUNGER_SUBTYPES
+
+
+def _lookup_dob(name: str, attr_cache: dict[str, list[tuple[str, str]]]) -> str | None:
+    for attr, val in attr_cache.get(name, ()):
+        if attr == "dob":
+            return val
+    return None
+
+
+
 def _get_extended_cfg_answer(
     question: str,
     query: list[str],
     answer_info,
     question_subtype: str,
     db,
+    bindings: dict[str, str] | None = None,
+    attr_cache: dict[str, list[tuple[str, str]]] | None = None,
 ) -> list[str]:
     """Extract answers for extended CFG question types.
 
-    For comparison questions: checks if the Prolog query succeeds to determine the winner.
-    For superlative/multi-constraint: runs the Prolog query and extracts the answer variable.
+    Fast path (comparisons): when ``bindings`` and ``attr_cache`` are provided, resolve
+    both branches to concrete names via the sampler's bindings and compare DOBs in
+    Python using the cache — no Prolog calls needed.
+
+    Slow path (superlative / multi-constraint, or cache miss): run the Prolog query.
     """
     from .utils import decode
 
+    # Fast path: age/born-first comparisons via cached DOB lookups.
+    if (
+        bindings is not None
+        and attr_cache is not None
+        and question_subtype in _COMPARISON_SUBTYPES
+    ):
+        left_var, right_var = answer_info
+        left_name = bindings.get(left_var)
+        right_name = bindings.get(right_var)
+        if left_name and right_name:
+            left_dob = _lookup_dob(left_name, attr_cache)
+            right_dob = _lookup_dob(right_name, attr_cache)
+            if left_dob is not None and right_dob is not None:
+                if question_subtype in _COMPARISON_YOUNGER_SUBTYPES:
+                    # younger = later DOB
+                    return [left_name] if left_dob > right_dob else [right_name]
+                # older / born first = earlier DOB
+                return [left_name] if left_dob < right_dob else [right_name]
+
     joined = ", ".join(reversed(query))
 
-    # Comparison types: query includes a comparison predicate.
-    # If query succeeds, left operand wins. If fails, right operand wins.
-    if question_subtype in (
-        COMPARISON_AGE_SUBTYPE,
-        COMPARISON_AGE_MC2_SUBTYPE,
-        COMPARISON_BORN_FIRST_SUBTYPE,
-        COMPARISON_BORN_FIRST_MC2_SUBTYPE,
-        COMPARISON_COUNT_MORE_SUBTYPE,
-    ):
-        results = list(db.prolog.query(joined))
+    # Slow path for comparisons (missing bindings/cache/DOB): existence-check Prolog.
+    if question_subtype in _COMPARISON_OLDER_SUBTYPES:
         left_var, right_var = answer_info
-        if results:
-            # Left operand wins — extract its name
-            if left_var in results[0]:
-                return [str(decode(results[0][left_var]))]
-            # left_var is a <name> placeholder already resolved in the query
+        first = next(iter(db.prolog.query(joined)), None)
+        if first is not None:
+            if left_var in first:
+                return [str(decode(first[left_var]))]
             import re
-
             m = re.match(r'Who is older, (.+?) or', question) or re.match(
                 r'Who was born first, (.+?) or', question
-            ) or re.match(r'Who has more .+?, (.+?) or', question)
-            return [m.group(1)] if m else []
-        else:
-            # Right operand wins
-            # Try to get the right person's name from a query without the comparison
-            no_cmp_query = ", ".join(reversed([q for q in query if "@<" not in q and ">" not in q]))
-            results2 = list(db.prolog.query(no_cmp_query))
-            if results2 and right_var in results2[0]:
-                return [str(decode(results2[0][right_var]))]
-            m = re.match(r'.+ or (.+?)\?', question)
-            return [m.group(1)] if m else []
-
-    elif question_subtype in (COMPARISON_AGE_YOUNGER_SUBTYPE, COMPARISON_AGE_YOUNGER_MC2_SUBTYPE, COMPARISON_COUNT_FEWER_SUBTYPE):
-        # "younger" / "fewer" — query has @< / >, so if it succeeds, left has EARLIER dob / MORE count.
-        # For "younger": left born earlier means left is OLDER, so right is younger (the answer).
-        # For "fewer": left has more, so right has fewer (the answer).
-        results = list(db.prolog.query(joined))
-        left_var, right_var = answer_info
-        if results:
-            # Left won the comparison (older / more) → right is the answer (younger / fewer)
-            no_cmp_query = ", ".join(reversed([q for q in query if "@<" not in q and ">" not in q]))
-            results2 = list(db.prolog.query(no_cmp_query))
-            if results2 and right_var in results2[0]:
-                return [str(decode(results2[0][right_var]))]
-            import re
-
-            m = re.match(r'.+ or (.+?)\?', question)
-            return [m.group(1)] if m else []
-        else:
-            # Left did NOT win → left is younger / fewer → left is the answer
-            no_cmp_query = ", ".join(reversed([q for q in query if "@<" not in q and ">" not in q]))
-            results2 = list(db.prolog.query(no_cmp_query))
-            if results2 and left_var in results2[0]:
-                return [str(decode(results2[0][left_var]))]
-            import re
-
-            m = re.match(r'Who is younger, (.+?) or', question) or re.match(
-                r'Who has fewer .+?, (.+?) or', question
             )
             return [m.group(1)] if m else []
+        import re
+        m = re.match(r'.+ or (.+?)\?', question)
+        return [m.group(1)] if m else []
 
-    else:
-        # Superlative and multi-constraint: answer_info is a variable name like 'Y_5'
-        results = list(db.prolog.query(joined))
-        if not results:
-            return []
-        return sorted({str(decode(r[answer_info])) for r in results if answer_info in r})
+    if question_subtype in _COMPARISON_YOUNGER_SUBTYPES:
+        first = next(iter(db.prolog.query(joined)), None)
+        if first is not None:
+            # Left won the older/born-first comparison → right is younger (answer)
+            import re
+            m = re.match(r'.+ or (.+?)\?', question)
+            return [m.group(1)] if m else []
+        import re
+        m = re.match(r'Who is younger, (.+?) or', question)
+        return [m.group(1)] if m else []
+
+    # Superlative and multi-constraint: answer_info is a variable name like 'Y_5'
+    answers = {
+        str(decode(r[answer_info]))
+        for r in db.prolog.query(joined)
+        if answer_info in r
+    }
+    return sorted(answers)
 
 
 def _filter_by_constraints(questions: list[dict], min_constraints: int = None, max_constraints: int = None) -> list[dict]:
@@ -378,21 +398,15 @@ def generate_dataset(
     # so create it once and pass it to the question generation function
     person_name_bank: list[str] = db.get_person_names()
 
-    # Create caches for person -> (attr name, attr value) and person -> (relation, related person) pairs
-    # When we iterate over multiple questions, we can reuse the same cache to avoid recomputing
-    # e.g. "John" -> [("dob", "1990-01-01"), ("job", "teacher"), ("hobby", "reading"),
-    # ("hobby", "swimming"), ...]
-    # NOTE: Invariant: (attr name, attr value) pairs are unique
-    # TODO: @anmolkabra, improve cache with type dict[str, set[tuple[str, str]]]
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]] = {}
-    # e.g. "John" -> [("child", "Alice"), ("child", "Bob"), ("friend", "Charlie"), ...]
-    # NOTE: Invariant: (relation, related person) pairs are unique
-    # TODO: @anmolkabra, improve cache with type dict[str, set[tuple[str, str]]]
     person_name2relation_and_related: dict[str, list[tuple[str, str]]] = {}
     # Inverse relation cache for bidirectional sampling: R(A, "key") lookups
     person_name2inverse_relation: dict[str, list[tuple[str, str]]] = {}
     if sampling_method == "bidirectional":
-        # TODO: anmolkabra, might not need prewarm, just populate the cache as sampling continues
+        # Bulk-populate all three caches at once before sampling begins so there
+        # are no cold-cache DB queries interleaved with sampling.
+        prewarm_forward_cache(person_name2attr_name_and_val, db, ATTRIBUTE_TYPES, num_multiprocesses)
+        prewarm_forward_cache(person_name2relation_and_related, db, RELATION, num_multiprocesses)
         prewarm_inverse_cache(person_name2inverse_relation, db, RELATION, num_multiprocesses)
 
     # To store all the questions and queries for all templates
@@ -500,6 +514,7 @@ def generate_dataset(
             rng = np.random.default_rng(seed)
             questions = []
             queries = []
+            bindings_list: list[dict[str, str]] = []
             attempts = 0
             max_attempts = num_questions_per_type * num_sampling_attempts
 
@@ -517,18 +532,23 @@ def generate_dataset(
                         num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=1,
+                        difficulty_level=difficulty_level,
+                        return_bindings=True,
                     )
                     if result is not None:
-                        question, query = result
+                        question, query, bindings = result
                         questions.append(question)
                         queries.append(query)
+                        bindings_list.append(bindings)
                 except (ValueError, AssertionError):
                     continue
 
             # Get answers for extended CFG questions
             for j in range(len(questions)):
                 answer_list = _get_extended_cfg_answer(
-                    questions[j], queries[j], answer_info, question_subtype, db
+                    questions[j], queries[j], answer_info, question_subtype, db,
+                    bindings=bindings_list[j],
+                    attr_cache=person_name2attr_name_and_val,
                 )
                 q_type = classify_question_type(question_template)
                 extended_cfg_questions_data.append(

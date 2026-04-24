@@ -81,8 +81,6 @@ ALL_QUESTION_TYPES = [
 COMPARISON_AGE_SUBTYPE = "comparison_age"
 COMPARISON_AGE_YOUNGER_SUBTYPE = "comparison_age_younger"
 COMPARISON_BORN_FIRST_SUBTYPE = "comparison_born_first"
-COMPARISON_COUNT_MORE_SUBTYPE = "comparison_count_more"
-COMPARISON_COUNT_FEWER_SUBTYPE = "comparison_count_fewer"
 MULTI_CONSTRAINT_2_SUBTYPE = "multi_constraint_2"
 MULTI_CONSTRAINT_3_SUBTYPE = "multi_constraint_3"
 COMPARISON_AGE_MC2_SUBTYPE = "comparison_age_mc2"
@@ -92,18 +90,16 @@ SUPERLATIVE_OLDEST_MC2_SUBTYPE = "superlative_oldest_mc2"
 SUPERLATIVE_YOUNGEST_MC2_SUBTYPE = "superlative_youngest_mc2"
 SUPERLATIVE_OLDEST_SUBTYPE = "superlative_oldest"
 SUPERLATIVE_YOUNGEST_SUBTYPE = "superlative_youngest"
-SUPERLATIVE_MOST_SUBTYPE = "superlative_most"
-SUPERLATIVE_FEWEST_SUBTYPE = "superlative_fewest"
 
 
 def classify_question_type(question_template: list[str]) -> str:
     """Classify a question template into one of the extended types based on its structure."""
     joined = " ".join(question_template)
-    if any(kw in joined for kw in ["older,", "younger,", "born first,", "has more", "has fewer"]):
+    if any(kw in joined for kw in ["older,", "younger,", "born first,"]):
         return QUESTION_TYPE_COMPARISON
     if "and whose" in joined:
         return QUESTION_TYPE_MULTI_CONSTRAINT
-    if any(kw in joined for kw in ["oldest", "youngest", "with the most", "with the fewest"]):
+    if any(kw in joined for kw in ["oldest", "youngest"]):
         return QUESTION_TYPE_SUPERLATIVE
     return QUESTION_TYPE_BASE
 
@@ -190,16 +186,24 @@ def _generate_extended_templates(
 
     rc_fragments = _generate_head_template_fragments(grammar, rc_nonterminal, depth, depth)
     mc2_fragments = _build_mc2_fragments(depth)
+    # Deep R_c fragments bypass the CFG depth=6 cap so mc2 builders can produce
+    # (hops>=3, constraints>=2) templates, and the superlative builder can
+    # produce (hops>=4, constraints=1) templates.
+    deep_rc_fragments = _build_deep_rc_fragments()
 
     if QUESTION_TYPE_COMPARISON in extended_types:
         templates += _build_comparison_templates(grammar, rc_fragments, depth)
-        templates += _build_comparison_mc2_templates(rc_fragments, mc2_fragments, depth)
+        templates += _build_comparison_mc2_templates(
+            rc_fragments + deep_rc_fragments, mc2_fragments, depth
+        )
 
     if QUESTION_TYPE_MULTI_CONSTRAINT in extended_types:
         templates += _build_multi_constraint_templates(depth)
 
     if QUESTION_TYPE_SUPERLATIVE in extended_types:
-        templates += _build_superlative_templates(grammar, rc_fragments, depth)
+        templates += _build_superlative_templates(
+            grammar, rc_fragments + deep_rc_fragments, depth
+        )
         templates += _build_superlative_mc2_templates(mc2_fragments, depth)
 
     return templates
@@ -263,6 +267,73 @@ def _count_hops(fragment: "Fragment") -> int:
         1 for atom in fragment.p_fragment
         if re.match(r"<relation>_\d+", atom)
     )
+
+
+def _build_explicit_chain_rc_fragment(
+    n_hops: int,
+    anchor_kind: str,
+    offset: int,
+) -> "Fragment":
+    """Build an R_c fragment with exactly n_hops relation placeholders.
+
+    Bypasses the CFG depth limit to unlock (hops>=3, constraints>=2) cells.
+    Used by the mc2 and superlative builders to add deeper chain variants.
+
+    Args:
+        n_hops: Number of chained <relation> placeholders (>= 1).
+        anchor_kind: 'name' or 'attr' — the innermost anchor.
+        offset: Starting index for all placeholder/variable subscripts.
+            Must be chosen to avoid collisions with CFG-generated fragments
+            (indices <= ~20 at depth=6) and mc2 fragments (60-61 at depth=6).
+
+    Chain semantics (Prolog reads ``rel(X, Y)`` as "Y is rel of X"):
+        answer = Y_{offset}
+        rel_0(Y_1, Y_0), rel_1(Y_2, Y_1), ..., rel_{n-1}(anchor, Y_{n-1})
+    """
+    assert n_hops >= 1, "n_hops must be >= 1"
+    assert anchor_kind in ("name", "attr")
+
+    q: list[str] = []
+    p: list[str] = []
+
+    for i in range(n_hops):
+        q.extend(["the", f"<relation>_{offset + i}", "of"])
+
+    if anchor_kind == "name":
+        anchor_arg = f"<name>_{offset + n_hops}"
+        q.append(anchor_arg)
+    else:  # attr
+        attr_n = f"<attribute_name>_{offset + n_hops}"
+        attr_v = f"<attribute_value>_{offset + n_hops}"
+        anchor_arg = f"Y_{offset + n_hops}"
+        q.extend(["the person whose", attr_n, "is", attr_v])
+
+    for i in range(n_hops):
+        outer = f"Y_{offset + i}"
+        inner = anchor_arg if i == n_hops - 1 else f"Y_{offset + i + 1}"
+        p.append(f"<relation>_{offset + i}({inner}, {outer})")
+
+    if anchor_kind == "attr":
+        p.append(f"<attribute_name>_{offset + n_hops}({anchor_arg}, <attribute_value>_{offset + n_hops})")
+
+    return Fragment(q_fragment=q, p_fragment=p, p_answer=f"Y_{offset}")
+
+
+def _build_deep_rc_fragments() -> list["Fragment"]:
+    """Build explicit R_c fragments for 2- and 3-hop chains (name and attr anchors).
+
+    Provides the deeper chains the CFG grammar cannot reach at depth=6, so that
+    mc2 and superlative builders can generate (hops>=3, constraints>=2) and
+    (hops>=4, constraints=1) templates.
+    """
+    fragments: list[Fragment] = []
+    # Each (n_hops, anchor) gets a 20-wide subscript slot starting at 200 to
+    # stay clear of CFG (<=20) and mc2 (60-61) fragment subscripts.
+    specs = [(2, "name"), (2, "attr"), (3, "name"), (3, "attr")]
+    for i, (n_hops, anchor) in enumerate(specs):
+        offset = 200 + i * 20
+        fragments.append(_build_explicit_chain_rc_fragment(n_hops, anchor, offset))
+    return fragments
 
 
 def _build_comparison_mc2_templates(
@@ -330,36 +401,77 @@ def _build_comparison_mc2_templates(
 def _build_superlative_mc2_templates(
     mc2_fragments: list["Fragment"],
     depth: int,
+    chain_depths: list[int] = (1, 2, 3),
 ) -> list[tuple]:
     """Build superlative templates where the anchor chain is a multi-constraint fragment.
 
     'Who is the oldest [relation] of the person whose [attr1] is X and whose [attr2] is Y?'
+    'Who is the oldest [rel1] of the [rel2] of the person whose [attr1] is X and ...?'
 
-    The mc2 fragment (0 hops, 2 constraints) provides the anchor person; a fresh relation
-    placeholder adds hops — producing (hops>=1, constraints>=2) questions.
+    The mc2 fragment (0 hops, 2 constraints) provides the innermost anchor person; one or
+    more fresh relation placeholders (chain depth N) are stacked on top to add hops,
+    producing (hops=N, constraints=2) questions. Depth-1 chains were the original
+    behavior; depths 2+ unlock (hops>=2, constraints=2) cells.
     """
     templates = []
-    rel_d = f"<relation>_{depth + 1}"
-    answer_var = f"Y_{depth + 1}"
     sup_d1 = f"SupD_{depth}"
     sup_d2 = f"SupD2_{depth}"
     sup_z = f"SupZ_{depth}"
 
-    for mc2_frag in mc2_fragments:
-        mc2_person = _get_person_var(mc2_frag)
+    for chain_depth in chain_depths:
+        assert chain_depth >= 1
+        # Subscript base for this chain's relation/answer variables.
+        # Use 300+ to stay clear of CFG (<=20), mc2 (60-61), deep-rc (200-280).
+        base = 300 + chain_depth * 10
+        answer_var = f"Y_{base}"
+        # The chain: answer = Y_base, then Y_{base+1}, ..., Y_{base+chain_depth-1}
+        # With rel_i(inner, outer) semantics:
+        # rel_0(Y_{base+1}, Y_base), rel_1(Y_{base+2}, Y_{base+1}), ...,
+        # rel_{N-1}(mc2_person, Y_{base+N-1})
 
-        for subtype, adj, op in [
-            (SUPERLATIVE_OLDEST_MC2_SUBTYPE, "oldest", "@<"),
-            (SUPERLATIVE_YOUNGEST_MC2_SUBTYPE, "youngest", "@>"),
-        ]:
-            q = ["Who is", f"the {adj}", rel_d, "of"] + mc2_frag.q_fragment + ["?"]
-            query = [
-                f"\\+ ({rel_d}({mc2_person}, {sup_z}), dob({sup_z}, {sup_d2}), "
-                f"{sup_z} \\= {answer_var}, {sup_d2} {op} {sup_d1})",
-                f"dob({answer_var}, {sup_d1})",
-                f"{rel_d}({mc2_person}, {answer_var})",
-            ] + mc2_frag.p_fragment
-            templates.append((q, query, answer_var, subtype))
+        for mc2_frag in mc2_fragments:
+            mc2_person = _get_person_var(mc2_frag)
+
+            # Build chain atoms (in query order: innermost first so reversal executes outermost first)
+            chain_q: list[str] = []
+            chain_p: list[str] = []
+            for i in range(chain_depth):
+                chain_q.extend(["the", f"<relation>_{base + i}", "of"])
+                outer = f"Y_{base + i}"
+                inner = mc2_person if i == chain_depth - 1 else f"Y_{base + i + 1}"
+                chain_p.append(f"<relation>_{base + i}({inner}, {outer})")
+
+            # Outer superlative wraps the chain: "the oldest <rel>_base of (chain of mc2)"
+            # For chain_depth >= 2, the outer <rel>_base is already in chain_p[0].
+            # The negation-as-failure uses the SAME outer relation and the chain inner target.
+            # If chain_depth == 1: outer inner = mc2_person directly.
+            # If chain_depth >= 2: outer's inner is Y_{base+1} (the answer of rel_1).
+            if chain_depth == 1:
+                nf_inner = mc2_person
+            else:
+                nf_inner = f"Y_{base + 1}"
+            rel_outer = f"<relation>_{base}"
+
+            for subtype, adj, op in [
+                (SUPERLATIVE_OLDEST_MC2_SUBTYPE, "oldest", "@<"),
+                (SUPERLATIVE_YOUNGEST_MC2_SUBTYPE, "youngest", "@>"),
+            ]:
+                # Question: "Who is the oldest <rel>_base of the <rel>_{base+1} of ... of <mc2>?"
+                # For chain_depth=1: "Who is the oldest <rel>_base of <mc2>?" (strip leading "the")
+                q_chain = chain_q.copy()
+                # Replace the very first "the" with the adjective marker form
+                # The original builder uses ["Who is", f"the {adj}", rel, "of", ...]
+                # So for our chain, we replace the first ["the", rel_base, "of"] with
+                # ["the ", adj, " ", rel_base, "of"] effectively as ["the {adj}", rel_base, "of"].
+                q_chain[0] = f"the {adj}"  # change "the" -> "the oldest"/"the youngest"
+
+                q = ["Who is"] + q_chain + mc2_frag.q_fragment + ["?"]
+                query = [
+                    f"\\+ ({rel_outer}({nf_inner}, {sup_z}), dob({sup_z}, {sup_d2}), "
+                    f"{sup_z} \\= {answer_var}, {sup_d2} {op} {sup_d1})",
+                    f"dob({answer_var}, {sup_d1})",
+                ] + chain_p + mc2_frag.p_fragment
+                templates.append((q, query, answer_var, subtype))
 
     return templates
 
@@ -407,32 +519,6 @@ def _build_comparison_templates(
                 # answer_info encodes left/right vars for answer extraction
                 answer_info = (left_var, right_var)
                 templates.append((q, age_query, answer_info, subtype))
-
-            # Count comparisons: "Who has more/fewer RN_p, R_c or R_c?"
-            # Uses a relation_plural placeholder for the counted relation
-            rn_p_d = f"<relation_plural>_{depth * 3}"
-            cnt_l_var = f"CmpCL_{depth}"
-            cnt_r_var = f"CmpCR_{depth}"
-            cnt_yl = f"CmpYL_{depth}"
-            cnt_yr = f"CmpYR_{depth}"
-
-            count_query = (
-                [
-                    f"{cnt_l_var} > {cnt_r_var}",
-                    f"aggregate_all(count, distinct({rn_p_d}({left_var}, {cnt_yl})), {cnt_l_var})",
-                    f"aggregate_all(count, distinct({rn_p_d}({right_var}, {cnt_yr})), {cnt_r_var})",
-                ]
-                + left_frag.p_fragment
-                + right_frag.p_fragment
-            )
-
-            for subtype, prefix in [
-                (COMPARISON_COUNT_MORE_SUBTYPE, ["Who has more", f"{rn_p_d}", ","]),
-                (COMPARISON_COUNT_FEWER_SUBTYPE, ["Who has fewer", f"{rn_p_d}", ","]),
-            ]:
-                q = prefix + left_frag.q_fragment + ["or"] + right_frag.q_fragment + ["?"]
-                answer_info = (left_var, right_var)
-                templates.append((q, count_query, answer_info, subtype))
 
     return templates
 
@@ -521,34 +607,6 @@ def _build_superlative_templates(
                 f"\\+ ({rel_d}({rc_person}, {sup_z}), dob({sup_z}, {sup_d2}), "
                 f"{sup_z} \\= {answer_var}, {sup_d2} {op} {sup_d1})",
                 f"dob({answer_var}, {sup_d1})",
-                f"{rel_d}({rc_person}, {answer_var})",
-            ] + rc_frag.p_fragment
-            templates.append((q, query, answer_var, subtype))
-
-        # Count-based superlatives: most/fewest
-        # R -> 'the' RN 'of' R_c 'with the most/fewest' RN_p
-        cnt_rel = f"<relation_plural>_{depth + 2}"
-        sup_cnt = f"SupC_{depth}"
-        sup_cnt2 = f"SupC2_{depth}"
-        sup_z2 = f"SupZ2_{depth}"
-        sup_w = f"SupW_{depth}"
-        sup_w2 = f"SupW2_{depth}"
-
-        for subtype, phrase, op in [
-            (SUPERLATIVE_MOST_SUBTYPE, "with the most", ">"),
-            (SUPERLATIVE_FEWEST_SUBTYPE, "with the fewest", "<"),
-        ]:
-            q = (
-                ["Who is", "the", rel_d, "of"]
-                + rc_frag.q_fragment
-                + [phrase, cnt_rel, "?"]
-            )
-            # Query: negation-as-failure for count extremum
-            query = [
-                f"\\+ ({rel_d}({rc_person}, {sup_z2}), {sup_z2} \\= {answer_var}, "
-                f"aggregate_all(count, distinct({cnt_rel}({sup_z2}, {sup_w2})), {sup_cnt2}), "
-                f"{sup_cnt2} {op} {sup_cnt})",
-                f"aggregate_all(count, distinct({cnt_rel}({answer_var}, {sup_w})), {sup_cnt})",
                 f"{rel_d}({rc_person}, {answer_var})",
             ] + rc_frag.p_fragment
             templates.append((q, query, answer_var, subtype))

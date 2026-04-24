@@ -135,6 +135,29 @@ def get_inverse_vals_and_update_cache(
         return query_and_answer
 
 
+def prewarm_forward_cache(
+    cache: dict[str, list[tuple[str, str]]],
+    db: Database,
+    query_bank: list[str],
+    num_procs: int,
+) -> None:
+    """Bulk-populate a forward cache for all people at once.
+
+    Queries each predicate Q(X, Y) once with both args unbound and builds the
+    forward mapping X -> [(Q, Y), ...].  This is O(total_facts) total — far
+    faster than per-person queries which are O(N * Q) with unindexed scans.
+
+    Works for both relation predicates (R(person, related_person)) and
+    attribute predicates (attr(person, value)).
+    """
+    queries = [f"{q}(X, Y)" for q in query_bank]
+    all_results = db.batch_query(queries, num_procs)
+    for q, results in zip(query_bank, all_results):
+        for r in results:
+            x, y = decode(r["X"]), decode(r["Y"])
+            cache.setdefault(x, []).append((q, y))
+
+
 def prewarm_inverse_cache(
     cache: dict[str, list[tuple[str, str]]],
     db: Database,
@@ -550,6 +573,8 @@ def sample_question(
     num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
+    difficulty_level: str | None = None,
+    return_bindings: bool = False,
 ) -> list[str, list[str]]:
     """
     Samples possible realizations of the question template and query template lists
@@ -772,6 +797,17 @@ def sample_question(
     for placeholder, sampled_value in question_assignments.items():
         question = question.replace(placeholder, sampled_value)
     # print(f"{question=}")
+
+    if return_bindings:
+        # Map each placeholder that resolved to a person to the person's name.
+        # Y_i → atom_assignments[A_i]; <name>_N → unquoted literal.
+        bindings: dict[str, str] = {}
+        for placeholder, val in query_assignments.items():
+            if val in atom_assignments:
+                bindings[placeholder] = atom_assignments[val]
+            elif isinstance(val, str) and len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+                bindings[placeholder] = val[1:-1]
+        return question, query, bindings
 
     return question, query
 
