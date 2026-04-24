@@ -573,7 +573,6 @@ def sample_question(
     num_procs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
-    difficulty_level: str | None = None,
     return_bindings: bool = False,
 ) -> list[str, list[str]]:
     """

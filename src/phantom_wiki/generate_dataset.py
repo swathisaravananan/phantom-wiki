@@ -44,15 +44,6 @@ from .utils import blue, generate_unique_id
 from .utils.get_answer import get_answer
 
 
-def _build_difficulty_fields(query: list[str]) -> dict:
-    """Build both the structured difficulty dict and the legacy scalar."""
-    structured = compute_difficulty(query)
-    return {
-        "reasoning_steps": structured["hops"],
-        "difficulty": structured,
-    }
-
-
 _COMPARISON_OLDER_SUBTYPES = frozenset({
     COMPARISON_AGE_SUBTYPE,
     COMPARISON_AGE_MC2_SUBTYPE,
@@ -532,7 +523,6 @@ def generate_dataset(
                         num_multiprocesses,
                         easy_mode=easy_mode,
                         num_sampling_attempts=1,
-                        difficulty_level=difficulty_level,
                         return_bindings=True,
                     )
                     if result is not None:

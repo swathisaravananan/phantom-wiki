@@ -41,7 +41,8 @@ from phantom_wiki.facts.database import Database
 from phantom_wiki.facts.templates import generate_templates, ALL_QUESTION_TYPES
 from phantom_wiki.facts.sample import sample_question, RELATION, prewarm_inverse_cache
 from phantom_wiki.facts.inverse_relations import register_inverse_predicates
-from phantom_wiki.generate_dataset import _get_extended_cfg_answer, _build_difficulty_fields
+from phantom_wiki.facts.difficulty import compute_difficulty
+from phantom_wiki.generate_dataset import _get_extended_cfg_answer
 from phantom_wiki.utils import generate_unique_id
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'out_1000_easy')
@@ -106,7 +107,6 @@ def generate_type_questions(tmpl, type_id, db, person_name_bank, p2attr, p2rel, 
     type_qs = []
     for q_text, q_query in zip(questions, queries):
         answer_list = _get_extended_cfg_answer(q_text, q_query, answer_info, question_subtype, db)
-        diff = _build_difficulty_fields(q_query)
         type_qs.append({
             'id': generate_unique_id(),
             'question': q_text,
@@ -115,8 +115,7 @@ def generate_type_questions(tmpl, type_id, db, person_name_bank, p2attr, p2rel, 
             'prolog': {'query': q_query, 'answer': str(answer_info)},
             'template': question_template,
             'type': type_id,
-            'reasoning_steps': diff['reasoning_steps'],
-            'difficulty': diff['difficulty'],
+            'difficulty': compute_difficulty(q_query),
             'is_aggregation_question': False,
             'question_category': question_subtype,
         })
