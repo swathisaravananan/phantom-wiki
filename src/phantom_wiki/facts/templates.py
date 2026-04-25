@@ -67,12 +67,14 @@ QA_GRAMMAR_STRING = """
 
 # Question type categories for filtering
 QUESTION_TYPE_BASE = "base"
-QUESTION_TYPE_COMPARISON = "comparison"
+QUESTION_TYPE_COMPARISON_AGE = "comparison_age"
+QUESTION_TYPE_COMPARISON_COUNT = "comparison_count"
 QUESTION_TYPE_MULTI_CONSTRAINT = "multi_constraint"
 QUESTION_TYPE_SUPERLATIVE = "superlative"
 ALL_QUESTION_TYPES = [
     QUESTION_TYPE_BASE,
-    QUESTION_TYPE_COMPARISON,
+    QUESTION_TYPE_COMPARISON_AGE,
+    QUESTION_TYPE_COMPARISON_COUNT,
     QUESTION_TYPE_MULTI_CONSTRAINT,
     QUESTION_TYPE_SUPERLATIVE,
 ]
@@ -96,7 +98,9 @@ def classify_question_type(question_template: list[str]) -> str:
     """Classify a question template into one of the extended types based on its structure."""
     joined = " ".join(question_template)
     if any(kw in joined for kw in ["older,", "younger,", "born first,"]):
-        return QUESTION_TYPE_COMPARISON
+        return QUESTION_TYPE_COMPARISON_AGE
+    if any(kw in joined for kw in ["has more ", "has fewer "]):
+        return QUESTION_TYPE_COMPARISON_COUNT
     if "and whose" in joined:
         return QUESTION_TYPE_MULTI_CONSTRAINT
     if any(kw in joined for kw in ["oldest", "youngest"]):
@@ -130,7 +134,8 @@ def generate_templates(grammar: CFG = None, depth=4, question_types=None) -> Ite
         depth: The maximal depth of the generated tree.
             Default value 4, minimum depth of QA_GRAMMAR_STRING.
         question_types: List of question type strings to include. If None, only base types.
-            Use ALL_QUESTION_TYPES or a subset like ["base", "comparison", "superlative"].
+            Use ALL_QUESTION_TYPES or a subset like
+            ["base", "comparison_age", "superlative"].
 
     Returns:
         A list of tuples. Base templates are 3-tuples: (question_template, query_template, answer).
@@ -191,11 +196,15 @@ def _generate_extended_templates(
     # produce (hops>=4, constraints=1) templates.
     deep_rc_fragments = _build_deep_rc_fragments()
 
-    if QUESTION_TYPE_COMPARISON in extended_types:
+    if QUESTION_TYPE_COMPARISON_AGE in extended_types:
         templates += _build_comparison_templates(grammar, rc_fragments, depth)
         templates += _build_comparison_mc2_templates(
             rc_fragments + deep_rc_fragments, mc2_fragments, depth
         )
+
+    # Count-comparison templates are added in step 2 of this refactor.
+    # Until then, ``comparison_count`` only emits the legacy 1-hop standalone
+    # ``Who has more <relation_plural>, A or B?`` from extended_questions.py.
 
     if QUESTION_TYPE_MULTI_CONSTRAINT in extended_types:
         templates += _build_multi_constraint_templates(depth)

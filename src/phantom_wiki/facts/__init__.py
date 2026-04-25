@@ -88,7 +88,7 @@ question_parser.add_argument(
     "--question-types",
     type=str,
     default=None,
-    help="Comma-separated question types to generate: base,comparison,multi_constraint,superlative (default: all)",
+    help="Comma-separated question types to generate: base,comparison_age,comparison_count,multi_constraint,superlative (default: all)",
 )
 question_parser.add_argument(
     "--min-hops",

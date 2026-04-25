@@ -145,42 +145,71 @@ def _extract_variables(atom: str) -> set[str]:
     return set(_VARIABLE_RE.findall(atom_no_strings)) - GENDER_FILTERS
 
 
-def _split_comparison_branches(query_template: list[str]) -> tuple[list[str], list[str]] | None:
-    """Split a CmpDL/CmpDR comparison query into left and right branch atoms.
+_BARE_CMP_RE = re.compile(r"@[<>]|>=|<=|=:=|==|>|<")
 
-    Returns (left_atoms, right_atoms) if the query uses the CmpDL/CmpDR pattern,
-    or None if it is not a two-branch comparison query.  Atoms that are part of
-    the comparison plumbing (the @< operator, the dob value-retrieval atoms that
-    bind CmpDL/CmpDR) are excluded from both branches.
+
+def _is_bare_comparison_atom(atom: str) -> bool:
+    """True for top-level comparison-operator atoms like ``D1 @< D2`` or ``C1 > C2``.
+
+    Excludes atoms with parens (predicates, negations) so comparison operators
+    nested inside ``\\+ (... @< ...)`` aggregation plumbing are not mistaken
+    for top-level comparisons.
     """
-    left_root = right_root = None
+    a = atom.strip()
+    if a.startswith("\\+"):
+        return False
+    if "(" in a:
+        return False
+    return bool(_BARE_CMP_RE.search(a))
+
+
+def _split_comparison_branches(query_template: list[str]) -> list[list[str]] | None:
+    """Split a comparison query into K parallel branches.
+
+    Detects two binder shapes:
+
+    - ``dob(Entity, V)`` where ``V`` flows into a top-level ``@<``/``@>``
+      comparison.  This is *plumbing* — the atom is excluded from branch
+      content; the branch's chain is whatever connects to ``Entity``.
+    - ``aggregate_all(count, distinct(P(Entity, _)), V)`` where ``V`` flows
+      into a top-level numeric comparison.  This is *content* — the atom is
+      retained in the branch and contributes ``hop_counts[P]`` hops.
+
+    Returns a list of branch atom lists (one per binder), or ``None`` if no
+    two-branch comparison pattern is present.  Comparison-operator atoms are
+    excluded from all branches.
+    """
+    cmp_atom_idx: set[int] = set()
     cmp_vars: set[str] = set()
-
-    for atom in query_template:
-        if "CmpDL" not in atom and "CmpDR" not in atom:
-            continue
-        if "@<" in atom or "@>" in atom:
+    for i, atom in enumerate(query_template):
+        if _is_bare_comparison_atom(atom):
+            cmp_atom_idx.add(i)
             cmp_vars.update(_extract_variables(atom))
-            continue
-        # dob(Y_2, CmpDL_6) — binds a person var to a comparison var
-        pred, args = _parse_predicate(atom)
-        if pred == "dob" and len(args) >= 2:
-            var_name = args[0].strip()
-            cmp_var = args[1].strip()
-            if "CmpDL" in cmp_var:
-                left_root = var_name
-            elif "CmpDR" in cmp_var:
-                right_root = var_name
-            cmp_vars.add(var_name)
-            cmp_vars.update(_extract_variables(atom))
-
-    if left_root is None or right_root is None:
+    if not cmp_vars:
         return None
 
-    # Build variable connectivity via union-find to assign atoms to branches.
-    # Start with left_root connected to "L" and right_root connected to "R".
-    _SENTINELS = {"L_BRANCH", "R_BRANCH"}
-    parent: dict[str, str] = {}
+    # binder_info: (atom_idx, kind, entity_token).  entity_token may be a
+    # variable name (e.g. ``Y_2``) or a quoted literal (e.g. ``"Alice"``).
+    binder_info: list[tuple[int, str, str]] = []
+    for i, atom in enumerate(query_template):
+        if i in cmp_atom_idx:
+            continue
+        pred, args = _parse_predicate(atom)
+        if pred == "dob" and len(args) >= 2 and args[1].strip() in cmp_vars:
+            binder_info.append((i, "dob_plumbing", args[0].strip()))
+        elif pred == "aggregate_all" and len(args) >= 3 and args[-1].strip() in cmp_vars:
+            distinct_pred, distinct_args = _parse_predicate(args[1])
+            if distinct_pred == "distinct" and distinct_args:
+                inner_pred, inner_args = _parse_predicate(distinct_args[0])
+                if inner_pred and inner_args:
+                    binder_info.append((i, "aggregate_content", inner_args[0].strip()))
+
+    if len(binder_info) < 2:
+        return None
+
+    branch_count = len(binder_info)
+    sentinels = [f"_BRANCH_{k}" for k in range(branch_count)]
+    parent: dict[str, str] = {s: s for s in sentinels}
 
     def find(x: str) -> str:
         while parent.get(x, x) != x:
@@ -191,49 +220,44 @@ def _split_comparison_branches(query_template: list[str]) -> tuple[list[str], li
     def union(a: str, b: str) -> None:
         ra, rb = find(a), find(b)
         if ra != rb:
-            # Always keep sentinel labels as the root
-            if rb in _SENTINELS:
+            if rb in sentinels:
                 parent[ra] = rb
             else:
                 parent[rb] = ra
 
-    # Seed the two branches with sentinel labels
-    parent[left_root] = "L_BRANCH"
-    parent["L_BRANCH"] = "L_BRANCH"
-    parent[right_root] = "R_BRANCH"
-    parent["R_BRANCH"] = "R_BRANCH"
+    # Seed each branch sentinel with its binder's entity (when it's a variable).
+    branches: list[list[str]] = [[] for _ in range(branch_count)]
+    binder_skip_idx: set[int] = set()
+    for k, (idx, kind, entity) in enumerate(binder_info):
+        binder_skip_idx.add(idx)
+        if not _is_quoted_literal(entity):
+            parent.setdefault(entity, sentinels[k])
+            union(entity, sentinels[k])
+        if kind == "aggregate_content":
+            branches[k].append(query_template[idx])
 
-    # Collect content atoms (excluding comparison plumbing)
+    # Collect content atoms (excluding comparison plumbing and binders).
     content_atoms: list[tuple[str, set[str]]] = []
-    for atom in query_template:
-        if "@<" in atom or "@>" in atom:
+    for i, atom in enumerate(query_template):
+        if i in cmp_atom_idx or i in binder_skip_idx:
             continue
-        atom_vars = _extract_variables(atom)
-        if atom_vars & cmp_vars and _parse_predicate(atom)[0] == "dob":
-            # Skip dob value-retrieval atoms that bind CmpDL/CmpDR
-            if any(v.startswith("Cmp") for v in atom_vars):
-                continue
+        atom_vars = _extract_variables(atom) - cmp_vars
         content_atoms.append((atom, atom_vars))
 
-    # Union variables that co-occur in the same atom
     for _, atom_vars in content_atoms:
-        var_list = [v for v in atom_vars if not v.startswith("Cmp")]
-        for i in range(1, len(var_list)):
-            union(var_list[0], var_list[i])
+        vlist = [v for v in atom_vars if not v.startswith("Cmp")]
+        for i in range(1, len(vlist)):
+            union(vlist[0], vlist[i])
 
-    left_atoms: list[str] = []
-    right_atoms: list[str] = []
     for atom, atom_vars in content_atoms:
-        var_list = [v for v in atom_vars if not v.startswith("Cmp")]
-        if not var_list:
+        vlist = [v for v in atom_vars if not v.startswith("Cmp")]
+        if not vlist:
             continue
-        root = find(var_list[0])
-        if root == "L_BRANCH":
-            left_atoms.append(atom)
-        elif root == "R_BRANCH":
-            right_atoms.append(atom)
+        root = find(vlist[0])
+        if root in sentinels:
+            branches[sentinels.index(root)].append(atom)
 
-    return left_atoms, right_atoms
+    return branches
 
 
 def _score_atoms(atoms: list[str], hop_counts: dict[str, int]) -> tuple[int, int]:
@@ -292,11 +316,9 @@ def compute_difficulty(query_template: list[str]) -> dict:
 
     branches = _split_comparison_branches(query_template)
     if branches is not None:
-        left_atoms, right_atoms = branches
-        l_hops, l_cons = _score_atoms(left_atoms, hop_counts)
-        r_hops, r_cons = _score_atoms(right_atoms, hop_counts)
-        hops = max(l_hops, r_hops)
-        constraints = max(l_cons, r_cons)
+        scores = [_score_atoms(b, hop_counts) for b in branches]
+        hops = max((s[0] for s in scores), default=0)
+        constraints = max((s[1] for s in scores), default=0)
     else:
         hops, constraints = _score_atoms(query_template, hop_counts)
 

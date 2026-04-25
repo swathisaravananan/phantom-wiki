@@ -373,3 +373,89 @@ class TestGroundTruthQuestions:
         assert result["hops"] == 2, f"Expected 2 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
         assert result["composite"] == 3
+
+
+class TestCountComparisonBranches:
+    """Verify count-comparison queries are split into K branches and max-scored."""
+
+    def test_count_comparison_named_vs_named(self):
+        # "Who has more friends, Aida or Aubrey?" — each branch is one
+        # aggregate_all(friend) on a named entity. max(1, 1) = 1 hop.
+        query = [
+            'aggregate_all(count, distinct(friend("Aida Wang", X)), C1)',
+            'aggregate_all(count, distinct(friend("Aubrey Smock", Y)), C2)',
+            "C1 > C2",
+        ]
+        d = compute_difficulty(query)
+        assert d["hops"] == 1
+        assert d["constraints"] == 0
+        assert d["composite"] == 1
+
+    def test_count_comparison_chained_branches(self):
+        # "Who has more friends, the sister of Alice or the brother of Bob?"
+        # Each branch: aggregate_all(friend) + 1 chain hop = 2 hops. max = 2.
+        query = [
+            'aggregate_all(count, distinct(friend(Y_2, X)), C1)',
+            'sister("Alice", Y_2)',
+            'aggregate_all(count, distinct(friend(Y_4, Y)), C2)',
+            'brother("Bob", Y_4)',
+            "C1 > C2",
+        ]
+        d = compute_difficulty(query)
+        assert d["hops"] == 2
+        assert d["constraints"] == 0
+
+    def test_count_comparison_asymmetric_branches(self):
+        # Right branch is heavier (cousin = 3 hops + agg_all friend = 4) than
+        # left (named-only agg_all = 1).  max picks the heavier branch.
+        query = [
+            'aggregate_all(count, distinct(friend("Alice", X)), C1)',
+            'aggregate_all(count, distinct(friend(Y_4, Y)), C2)',
+            'cousin("Bob", Y_4)',
+            "C1 > C2",
+        ]
+        d = compute_difficulty(query)
+        assert d["hops"] == 4  # max(1, agg=1 + cousin=3)
+        assert d["constraints"] == 0
+
+    def test_count_comparison_three_way(self):
+        # K=3 branches: forward-looking generalization to N-way comparison.
+        query = [
+            'aggregate_all(count, distinct(friend("A", X1)), C1)',
+            'aggregate_all(count, distinct(friend("B", X2)), C2)',
+            'aggregate_all(count, distinct(friend("C", X3)), C3)',
+            "C1 > C2",
+            "C1 > C3",
+        ]
+        d = compute_difficulty(query)
+        assert d["hops"] == 1  # max across 3 branches, each = 1
+        assert d["constraints"] == 0
+
+    def test_count_comparison_with_constraint_branch(self):
+        # One branch has an attribute constraint on the chain.
+        query = [
+            'aggregate_all(count, distinct(friend(Y_2, X)), C1)',
+            'sister("Alice", Y_2)',
+            'hobby(Y_2, "shogi")',
+            'aggregate_all(count, distinct(friend("Bob", Y)), C2)',
+            "C1 > C2",
+        ]
+        d = compute_difficulty(query)
+        # Left branch: agg_all(friend)=1 + sister=1 = 2 hops, hobby = 1 cons
+        # Right branch: agg_all(friend) = 1 hop, 0 cons
+        assert d["hops"] == 2
+        assert d["constraints"] == 1
+
+    def test_age_comparison_unaffected_by_count_logic(self):
+        # Existing CmpDL/CmpDR age-comparison path must still work after
+        # generalizing the splitter.
+        query = [
+            "CmpDL_5 @< CmpDR_5",
+            "dob(Y_2, CmpDL_5)",
+            "dob(Y_4, CmpDR_5)",
+            'friend("Alice", Y_2)',
+            'parent("Bob", Y_4)',
+        ]
+        d = compute_difficulty(query)
+        assert d["hops"] == 1
+        assert d["constraints"] == 0
