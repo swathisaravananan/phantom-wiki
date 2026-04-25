@@ -6,8 +6,6 @@ import os
 import pytest
 
 from phantom_wiki.facts.difficulty import (
-    _load_all_rules,
-    _parse_rules_from_file,
     compute_difficulty,
     derive_relation_hop_counts,
 )
@@ -53,45 +51,35 @@ class TestDeriveRelationHopCounts:
     def test_father_parent_plus_gender(self):
         assert self.hops["father"] == 1
 
-    def test_nephew_sibling_plus_son(self):
-        # nephew(X,Y) :- sibling(X,A), son(A,Y) → 1+1 = 2 hops
+    def test_nephew(self):
         assert self.hops["nephew"] == 2
 
-    def test_niece_sibling_plus_daughter(self):
+    def test_niece(self):
         assert self.hops["niece"] == 2
 
-    def test_grandparent_two_parents(self):
-        # grandparent(X,Y) :- parent(X,Z), parent(Z,Y) → 2 hops
+    def test_grandparent(self):
         assert self.hops["grandparent"] == 2
 
-    def test_cousin_complex_derivation(self):
-        # cousin(X,Y) :- parent(X,A), parent(Y,B), sibling(A,B), X\=Y → 1+1+1 = 3
+    def test_cousin(self):
         assert self.hops["cousin"] == 3
 
-    def test_aunt_parent_plus_sister(self):
-        # aunt(X,Y) :- parent(X,A), sister(A,Y) → 1+1 = 2
+    def test_aunt(self):
         assert self.hops["aunt"] == 2
 
-    def test_uncle_parent_plus_brother(self):
+    def test_uncle(self):
         assert self.hops["uncle"] == 2
 
     def test_great_grandparent(self):
-        # great_grandparent(X,Y) :- grandparent(X,Z), parent(Z,Y) → 2+1 = 3
         assert self.hops["great_grandparent"] == 3
 
-    def test_second_cousin_deep(self):
-        # female_second_cousin → parent + parent + cousin + gender → 1+1+3 = 5
+    def test_second_cousin(self):
         assert self.hops["female_second_cousin"] == 5
 
-    def test_married_two_parent_lookups(self):
-        # married(X,Y) :- parent(Child,X), parent(Child,Y), X\=Y → 2
-        assert self.hops["married"] == 2
+    def test_wife(self):
+        assert self.hops["wife"] == 1
 
-    def test_wife_married_plus_gender(self):
-        assert self.hops["wife"] == 2
-
-    def test_husband_married_plus_gender(self):
-        assert self.hops["husband"] == 2
+    def test_husband(self):
+        assert self.hops["husband"] == 1
 
     def test_all_relations_present(self):
         from phantom_wiki.facts.family.constants import FAMILY_RELATION_DIFFICULTY
@@ -99,25 +87,6 @@ class TestDeriveRelationHopCounts:
 
         expected = set(FAMILY_RELATION_DIFFICULTY.keys()) | set(FRIENDSHIP_RELATION)
         assert expected.issubset(set(self.hops.keys()))
-
-
-class TestRuleParser:
-    """Verify Prolog rule file parsing."""
-
-    def test_parses_base_rules(self):
-        rules = _load_all_rules()
-        assert "sibling" in rules
-        assert "parent" in rules["sibling"]
-
-    def test_parses_derived_rules(self):
-        rules = _load_all_rules()
-        assert "nephew" in rules
-        assert "sibling" in rules["nephew"]
-        assert "son" in rules["nephew"]
-
-    def test_parses_friend_rules(self):
-        rules = _load_all_rules()
-        assert "friend" in rules
 
 
 # ---------------------------------------------------------------------------
@@ -281,22 +250,6 @@ class TestOutputSchema:
                 assert q["difficulty"]["hops"] > 0
 
 
-class TestRelationHopCountsAutoDerived:
-    """Verify hop counts update automatically when rules change."""
-
-    def test_counts_change_with_rules(self, tmp_path):
-        rule_file = tmp_path / "test_rules.pl"
-        rule_file.write_text(
-            "test_rel(X, Y) :-\n"
-            "  parent(X, Z),\n"
-            "  parent(Z, W),\n"
-            "  parent(W, Y).\n"
-        )
-        rules = _parse_rules_from_file(str(rule_file))
-        assert "test_rel" in rules
-        assert rules["test_rel"] == ["parent", "parent", "parent"]
-
-
 # ---------------------------------------------------------------------------
 # Ground-truth tests for the corrected difficulty computation
 # ---------------------------------------------------------------------------
@@ -332,10 +285,10 @@ class TestHopMapAssertions:
         assert self.hops["great_grandchild"] == 3
         assert self.hops["great_grandmother"] == 3
         assert self.hops["great_granddaughter"] == 3
-        assert self.hops["mother_in_law"] == 3
-        assert self.hops["father_in_law"] == 3
-        assert self.hops["sister_in_law"] == 3
-        assert self.hops["brother_in_law"] == 3
+        assert self.hops["mother_in_law"] == 2
+        assert self.hops["father_in_law"] == 2
+        assert self.hops["sister_in_law"] == 2
+        assert self.hops["brother_in_law"] == 2
 
 
 class TestConstraintCounter:
@@ -417,6 +370,6 @@ class TestGroundTruthQuestions:
             'sister_in_law("Dominique Smock", Y_8)',
         ]
         result = compute_difficulty(query)
-        assert result["hops"] == 3, f"Expected 3 hops, got {result['hops']}"
+        assert result["hops"] == 2, f"Expected 2 hops, got {result['hops']}"
         assert result["constraints"] == 1, f"Expected 1 constraint, got {result['constraints']}"
-        assert result["composite"] == 4
+        assert result["composite"] == 3

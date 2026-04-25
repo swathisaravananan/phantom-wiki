@@ -14,156 +14,25 @@ A scalar **composite** (hops + constraints) is provided for simple sorting.
 from __future__ import annotations
 
 import functools
-import os
 import re
 
 from .attributes.constants import ATTRIBUTE_TYPES
+from .family.constants import FAMILY_RELATION_DIFFICULTY
 from .friends.constants import FRIENDSHIP_RELATION
-
-# ---------------------------------------------------------------------------
-# Base predicates – facts stated directly in the knowledge graph.
-# These are NOT decomposable further and each count as exactly 1 hop.
-# ---------------------------------------------------------------------------
-BASE_PREDICATES = frozenset(
-    [
-        "parent",
-        "child",
-        "sibling",
-        "son",
-        "daughter",
-        "mother",
-        "father",
-        "wife",
-        "husband",
-        "married",
-        "friend",
-        "gender",
-        "male",
-        "female",
-        "nonbinary",
-    ]
-)
-
-# Semantic base facts: these represent single-step relationship traversals
-# in the knowledge graph, even though some have Prolog rule definitions
-# (e.g. sibling is defined via shared parents, but conceptually is 1 hop).
-SEMANTIC_BASE_FACTS = frozenset(
-    ["friend", "sibling", "parent", "child", "son", "daughter", "mother", "father"]
-)
 
 # Predicates that are gender filters, not relational hops
 GENDER_FILTERS = frozenset(["male", "female", "nonbinary", "gender"])
 
-# ---------------------------------------------------------------------------
-# Prolog rule parser — auto-derives hop counts from .pl files
-# ---------------------------------------------------------------------------
-
-_RULE_RE = re.compile(
-    r"^(\w+)\([^)]*\)\s*:-\s*$", re.MULTILINE,
-)
-_BODY_PRED_RE = re.compile(r"(\w+)\(")
-
-
-def _parse_rules_from_file(path: str) -> dict[str, list[str]]:
-    """Parse a Prolog file and return {head_predicate: [body_predicates...]}.
-
-    Handles multi-line rules terminated by a period.
-    """
-    rules: dict[str, list[str]] = {}
-    with open(path) as f:
-        text = f.read()
-
-    # Split into individual clauses (separated by '.\n')
-    clauses = re.split(r"\.\s*\n", text)
-    for clause in clauses:
-        clause = clause.strip()
-        if ":-" not in clause:
-            continue
-        head_part, body_part = clause.split(":-", 1)
-        head_match = re.match(r"(\w+)\(", head_part.strip())
-        if not head_match:
-            continue
-        head_name = head_match.group(1)
-
-        body_preds = []
-        for part in body_part.split(","):
-            part = part.strip().rstrip(".")
-            # Skip operators and comparisons
-            if not part or part.startswith("\\+") or "@<" in part or "@>" in part:
-                continue
-            if "\\=" in part or "==" in part:
-                continue
-            m = _BODY_PRED_RE.match(part)
-            if m:
-                body_preds.append(m.group(1))
-
-        if body_preds:
-            rules[head_name] = body_preds
-
-    return rules
-
-
-@functools.lru_cache(maxsize=1)
-def _load_all_rules() -> dict[str, list[str]]:
-    """Load and merge rules from all Prolog rule files."""
-    facts_dir = os.path.dirname(__file__)
-    rule_files = [
-        os.path.join(facts_dir, "family", "rules_base.pl"),
-        os.path.join(facts_dir, "family", "rules_derived.pl"),
-        os.path.join(facts_dir, "friends", "rules.pl"),
-    ]
-    merged: dict[str, list[str]] = {}
-    for path in rule_files:
-        if os.path.exists(path):
-            merged.update(_parse_rules_from_file(path))
-    return merged
-
 
 @functools.lru_cache(maxsize=1)
 def derive_relation_hop_counts() -> dict[str, int]:
-    """Derive a mapping of relation_name → hop_count from Prolog rules.
-
-    Base predicates count as 1 hop.  Derived predicates recursively sum
-    the hop counts of their body predicates, excluding gender filters
-    (which are constraints, not hops in the relation chain).
+    """Return {relation_name: hop_count} sourced from FAMILY_RELATION_DIFFICULTY
+    plus friendship relations (1 hop each).
     """
-    rules = _load_all_rules()
-    cache: dict[str, int] = {}
-
-    def _count(pred: str, visited: frozenset[str] = frozenset()) -> int:
-        if pred in cache:
-            return cache[pred]
-        if pred in visited:
-            return 1  # break cycles
-        if pred in GENDER_FILTERS:
-            return 0  # gender checks are not hops
-        if pred in SEMANTIC_BASE_FACTS:
-            return 1  # semantic base fact → always 1 hop
-        if pred not in rules:
-            return 1  # base fact or unknown → 1 hop
-
-        visited = visited | {pred}
-        total = 0
-        for body_pred in rules[pred]:
-            if body_pred in GENDER_FILTERS:
-                continue  # skip gender filters in body
-            total += _count(body_pred, visited)
-        cache[pred] = max(total, 1)
-        return cache[pred]
-
-    # Ensure all relations used in questions are counted
-    from .family.constants import FAMILY_RELATION_DIFFICULTY
-
-    all_relations = list(FAMILY_RELATION_DIFFICULTY.keys()) + list(FRIENDSHIP_RELATION)
-    for rel in all_relations:
-        cache[rel] = _count(rel)
-
-    # Also process any rule heads we haven't seen yet
-    for head in rules:
-        if head not in cache:
-            cache[head] = _count(head)
-
-    return dict(cache)
+    hops = dict(FAMILY_RELATION_DIFFICULTY)
+    for rel in FRIENDSHIP_RELATION:
+        hops[rel] = 1
+    return hops
 
 
 # ---------------------------------------------------------------------------

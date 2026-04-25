@@ -26,7 +26,7 @@ from .facts.question_difficulty import calculate_query_difficulty
 from .facts.bidirectional_sample import sample_question_bidirectional
 from .facts.inverse_relations import register_inverse_predicates
 from .facts.attributes.constants import ATTRIBUTE_TYPES
-from .facts.sample import RELATION, prewarm_forward_cache, prewarm_inverse_cache, sample_question
+from .facts.sample import get_relation_bank, prewarm_forward_cache, prewarm_inverse_cache, sample_question
 from .facts.templates import (
     ALL_QUESTION_TYPES,
     COMPARISON_AGE_MC2_SUBTYPE,
@@ -397,8 +397,9 @@ def generate_dataset(
         # Bulk-populate all three caches at once before sampling begins so there
         # are no cold-cache DB queries interleaved with sampling.
         prewarm_forward_cache(person_name2attr_name_and_val, db, ATTRIBUTE_TYPES, num_multiprocesses)
-        prewarm_forward_cache(person_name2relation_and_related, db, RELATION, num_multiprocesses)
-        prewarm_inverse_cache(person_name2inverse_relation, db, RELATION, num_multiprocesses)
+        relation_bank = get_relation_bank(easy_mode)
+        prewarm_forward_cache(person_name2relation_and_related, db, relation_bank, num_multiprocesses)
+        prewarm_inverse_cache(person_name2inverse_relation, db, relation_bank, num_multiprocesses)
 
     # To store all the questions and queries for all templates
     all_questions = []
