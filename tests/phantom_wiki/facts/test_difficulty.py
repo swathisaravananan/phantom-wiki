@@ -459,3 +459,39 @@ class TestCountComparisonBranches:
         d = compute_difficulty(query)
         assert d["hops"] == 1
         assert d["constraints"] == 0
+
+    def test_count_comparison_chained_with_ans_binders(self):
+        # Mirrors what `sample_comparison_count_extended_question` emits for
+        # chain_depth=1 named-vs-named: the LeftAns/RightAns unifications are
+        # plumbing for answer extraction, not difficulty hops/constraints.
+        query = [
+            'sister("Alice", LP1)',
+            'brother("Bob", RP1)',
+            'aggregate_all(count, distinct(friend(LP1, _LX)), CL)',
+            'aggregate_all(count, distinct(friend(RP1, _RX)), CR)',
+            "LeftAns = LP1",
+            "RightAns = RP1",
+            "CL > CR",
+        ]
+        d = compute_difficulty(query)
+        # Each branch: aggregate_all(friend) = 1 hop + sister/brother = 1 hop = 2
+        assert d["hops"] == 2
+        assert d["constraints"] == 0
+
+    def test_count_comparison_mc2_with_ans_binders(self):
+        # chain_depth=0 with mc2 anchor on the left branch.
+        # Left: agg_all(friend) over mc2 person = 1 hop, 2 attribute constraints.
+        # Right: agg_all(friend) over named person = 1 hop, 0 constraints.
+        # max → (1, 2).
+        query = [
+            'job(LP0, "actuary")',
+            'hobby(LP0, "shogi")',
+            'aggregate_all(count, distinct(friend(LP0, _LX)), CL)',
+            'aggregate_all(count, distinct(friend("Bob", _RX)), CR)',
+            "LeftAns = LP0",
+            'RightAns = "Bob"',
+            "CL > CR",
+        ]
+        d = compute_difficulty(query)
+        assert d["hops"] == 1
+        assert d["constraints"] == 2

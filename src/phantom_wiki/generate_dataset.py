@@ -14,13 +14,8 @@ from .facts.attributes import db_generate_attributes
 from .facts.balanced_sampling import balanced_sample, filter_by_difficulty, sample_questions
 from .facts.balanced_sampling import describe_pool as _describe_pool
 from .facts.extended_questions import (
-    COMPARISON_AGE_TYPE,
-    COMPARISON_COUNT_TYPE,
+    EXTENDED_QUESTION_CATEGORY,
     EXTENDED_QUESTION_TYPES,
-    MULTI_CONSTRAINT_TYPE,
-    SUPERLATIVE_MOST_TYPE,
-    SUPERLATIVE_OLDEST_TYPE,
-    SUPERLATIVE_YOUNGEST_TYPE,
     get_extended_answer,
     is_extended_question,
     sample_extended_question,
@@ -42,26 +37,10 @@ from .facts.templates import (
     COMPARISON_BORN_FIRST_MC2_SUBTYPE,
     COMPARISON_BORN_FIRST_SUBTYPE,
     QUESTION_TYPE_BASE,
-    QUESTION_TYPE_COMPARISON_AGE,
-    QUESTION_TYPE_COMPARISON_COUNT,
-    QUESTION_TYPE_MULTI_CONSTRAINT,
-    QUESTION_TYPE_SUPERLATIVE,
     classify_question_type,
     generate_templates,
     is_aggregation_question,
 )
-
-
-# Map each legacy 1-hop EXTENDED_QUESTION_TYPES entry to its high-level
-# question type so the legacy generator loop can be filtered by --question-types.
-_LEGACY_EXTENDED_TO_QTYPE = {
-    COMPARISON_AGE_TYPE: QUESTION_TYPE_COMPARISON_AGE,
-    COMPARISON_COUNT_TYPE: QUESTION_TYPE_COMPARISON_COUNT,
-    MULTI_CONSTRAINT_TYPE: QUESTION_TYPE_MULTI_CONSTRAINT,
-    SUPERLATIVE_OLDEST_TYPE: QUESTION_TYPE_SUPERLATIVE,
-    SUPERLATIVE_YOUNGEST_TYPE: QUESTION_TYPE_SUPERLATIVE,
-    SUPERLATIVE_MOST_TYPE: QUESTION_TYPE_SUPERLATIVE,
-}
 from .utils import blue, generate_unique_id
 from .utils.get_answer import get_answer
 
@@ -581,12 +560,12 @@ def generate_dataset(
     # Generate legacy extended question types (backward compat, standalone 1-hop)
     extended_questions_data = []
     if QUESTION_TYPE_BASE in parsed_qtypes:
-        # Only generate the legacy 1-hop variants whose high-level qtype is
-        # also in parsed_qtypes — so e.g. dropping ``comparison_age`` from
-        # --question-types skips legacy "Who is older, A or B?" too.
+        # Only generate extended variants whose high-level qtype is also in
+        # parsed_qtypes — so e.g. dropping ``comparison_age`` from
+        # --question-types skips "Who is older, A or B?" too.
         legacy_qtypes_to_run = [
             t for t in EXTENDED_QUESTION_TYPES
-            if _LEGACY_EXTENDED_TO_QTYPE[t] in parsed_qtypes
+            if EXTENDED_QUESTION_CATEGORY[t] in parsed_qtypes
         ]
         blue("Generating extended question types")
         for qtype in legacy_qtypes_to_run:

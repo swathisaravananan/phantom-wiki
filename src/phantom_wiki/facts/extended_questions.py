@@ -33,20 +33,53 @@ from .sample import RELATION_ALIAS, RELATION_PLURAL_ALIAS, get_relation_bank, ge
 # Question type identifiers
 # ---------------------------------------------------------------------------
 COMPARISON_AGE_TYPE = "comparison_age"
-COMPARISON_COUNT_TYPE = "comparison_count"
+# Count-comparison variants: each entry maps to a (chain_depth, mc2_left) config
+# in COMPARISON_COUNT_VARIANTS below. Cell targets in the (hops, constraints)
+# matrix when used with the step-3 difficulty splitter:
+#   _TYPE                       chain  mc2   target cell
+COMPARISON_COUNT_TYPE = "comparison_count"                        # 0  False  (1, 0)
+COMPARISON_COUNT_CHAIN1_TYPE = "comparison_count_chain1"          # 1  False  (2, 0)
+COMPARISON_COUNT_CHAIN2_TYPE = "comparison_count_chain2"          # 2  False  (3, 0)
+COMPARISON_COUNT_CHAIN3_TYPE = "comparison_count_chain3"          # 3  False  (4, 0)
+COMPARISON_COUNT_MC2_TYPE = "comparison_count_mc2"                # 0  True   (1, 2)
+COMPARISON_COUNT_CHAIN1_MC2_TYPE = "comparison_count_chain1_mc2"  # 1  True   (2, 2)
+COMPARISON_COUNT_CHAIN2_MC2_TYPE = "comparison_count_chain2_mc2"  # 2  True   (3, 2)
 MULTI_CONSTRAINT_TYPE = "multi_constraint"
 SUPERLATIVE_OLDEST_TYPE = "superlative_oldest"
 SUPERLATIVE_YOUNGEST_TYPE = "superlative_youngest"
 SUPERLATIVE_MOST_TYPE = "superlative_most"
 
+# (chain_depth_per_branch, mc2_on_left_branch) for each count-comparison variant.
+# Right branch is always a named anchor with the same chain depth.
+COMPARISON_COUNT_VARIANTS: dict[str, tuple[int, bool]] = {
+    COMPARISON_COUNT_TYPE: (0, False),
+    COMPARISON_COUNT_CHAIN1_TYPE: (1, False),
+    COMPARISON_COUNT_CHAIN2_TYPE: (2, False),
+    COMPARISON_COUNT_CHAIN3_TYPE: (3, False),
+    COMPARISON_COUNT_MC2_TYPE: (0, True),
+    COMPARISON_COUNT_CHAIN1_MC2_TYPE: (1, True),
+    COMPARISON_COUNT_CHAIN2_MC2_TYPE: (2, True),
+}
+
 EXTENDED_QUESTION_TYPES = [
     COMPARISON_AGE_TYPE,
-    COMPARISON_COUNT_TYPE,
+    *COMPARISON_COUNT_VARIANTS.keys(),
     MULTI_CONSTRAINT_TYPE,
     SUPERLATIVE_OLDEST_TYPE,
     SUPERLATIVE_YOUNGEST_TYPE,
     SUPERLATIVE_MOST_TYPE,
 ]
+
+# Maps each legacy 1-hop EXTENDED_QUESTION_TYPES entry to its high-level
+# question-type category, so the dataset generator can filter by --question-types.
+EXTENDED_QUESTION_CATEGORY: dict[str, str] = {
+    COMPARISON_AGE_TYPE: "comparison_age",
+    **{t: "comparison_count" for t in COMPARISON_COUNT_VARIANTS},
+    MULTI_CONSTRAINT_TYPE: "multi_constraint",
+    SUPERLATIVE_OLDEST_TYPE: "superlative",
+    SUPERLATIVE_YOUNGEST_TYPE: "superlative",
+    SUPERLATIVE_MOST_TYPE: "superlative",
+}
 
 
 def is_extended_question(question: str) -> bool:
@@ -111,52 +144,196 @@ def sample_comparison_age_question(
 
 
 # ---------------------------------------------------------------------------
-# Comparison: count of relations
+# Comparison: count of relations (chained + mc2 unified sampler)
 # ---------------------------------------------------------------------------
-def sample_comparison_count_question(
+def _build_count_branch(
     rng: Generator,
     db: Database,
     person_name_bank: list[str],
+    person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
-    easy_mode: bool = False,
-    num_sampling_attempts: int = 100,
-) -> tuple[str, list[str]] | None:
-    """Sample: 'Who has more <relation_plural>, <name_1> or <name_2>?'
+    num_procs: int,
+    chain_depth: int,
+    mc2: bool,
+    var_prefix: str,
+    easy_mode: bool,
+    num_sampling_attempts: int = 50,
+) -> dict | None:
+    """Build one branch of a count-comparison question.
 
-    Prolog query:
-        aggregate_all(count, distinct(<relation>("<name_1>", X)), C1),
-        aggregate_all(count, distinct(<relation>("<name_2>", Y)), C2),
-        C1 > C2
+    Walks ``chain_depth`` random relation hops from an anchor. The anchor is
+    either a named person or a person uniquely identified by two attribute
+    constraints (``mc2=True``).
+
+    Returns a dict with:
+      - ``text``: natural-language description of the branch ("the sister of Alice")
+      - ``atoms``: prolog atoms (anchor + chain)
+      - ``endpoint_name``: name of the person at the end of the chain
+      - ``endpoint_var``: prolog term that resolves to the endpoint
+        (a quoted literal for chain_depth=0 named, otherwise a variable)
+    Returns ``None`` if no valid branch can be sampled.
     """
     relation_bank = get_relation_bank(easy_mode)
 
     for _ in range(num_sampling_attempts):
-        if len(person_name_bank) < 2:
-            return None
-        idxs = rng.choice(len(person_name_bank), size=2, replace=False)
-        name1 = person_name_bank[idxs[0]]
-        name2 = person_name_bank[idxs[1]]
+        # Step 1: pick the anchor
+        if mc2:
+            person = person_name_bank[rng.integers(0, len(person_name_bank))]
+            attrs = get_vals_and_update_cache(
+                cache=person_name2attr_name_and_val,
+                key=person,
+                db=db,
+                query_bank=ATTRIBUTE_TYPES,
+                num_procs=num_procs,
+            )
+            if len(attrs) < 2:
+                continue
+            idxs = rng.choice(len(attrs), size=2, replace=False)
+            attr1_name, attr1_val = attrs[idxs[0]]
+            attr2_name, attr2_val = attrs[idxs[1]]
 
-        relation = relation_bank[rng.integers(0, len(relation_bank))]
-        relation_plural = RELATION_PLURAL_ALIAS.get(relation, relation + "s")
+            # Require uniqueness so the branch resolves to exactly one person
+            uniqueness_q = (
+                f'{attr1_name}(X, "{attr1_val}"), {attr2_name}(X, "{attr2_val}")'
+            )
+            if len(list(db.prolog.query(uniqueness_q))) != 1:
+                continue
 
-        # Check both have at least one of this relation and counts differ
-        r1 = db.query(f'distinct({relation}("{name1}", X))')
-        r2 = db.query(f'distinct({relation}("{name2}", X))')
+            anchor_var = f"{var_prefix}0"
+            attr1_alias = ATTRIBUTE_ALIASES[attr1_name]
+            attr2_alias = ATTRIBUTE_ALIASES[attr2_name]
+            anchor_text = (
+                f"the person whose {attr1_alias} is {attr1_val} "
+                f"and whose {attr2_alias} is {attr2_val}"
+            )
+            anchor_atoms = [
+                f'{attr1_name}({anchor_var}, "{attr1_val}")',
+                f'{attr2_name}({anchor_var}, "{attr2_val}")',
+            ]
+            current_var = anchor_var
+            current_person = person
+        else:
+            person = person_name_bank[rng.integers(0, len(person_name_bank))]
+            anchor_text = person
+            anchor_atoms = []
+            current_var = f'"{person}"'
+            current_person = person
 
-        c1 = len(r1)
-        c2 = len(r2)
-        if c1 == 0 and c2 == 0:
+        # Step 2: walk chain_depth relation hops
+        chain_atoms: list[str] = []
+        chain_words: list[str] = []
+        success = True
+        for hop in range(chain_depth):
+            relations = get_vals_and_update_cache(
+                cache=person_name2relation_and_related,
+                key=current_person,
+                db=db,
+                query_bank=relation_bank,
+                num_procs=num_procs,
+            )
+            if not relations:
+                success = False
+                break
+            rel, related = relations[rng.integers(0, len(relations))]
+            rel_alias = RELATION_ALIAS.get(rel, rel)
+            next_var = f"{var_prefix}{hop + 1}"
+            chain_atoms.append(f"{rel}({current_var}, {next_var})")
+            chain_words.append(f"the {rel_alias} of")
+            current_var = next_var
+            current_person = related
+
+        if not success:
             continue
-        if c1 == c2:
-            continue  # need a clear winner
 
-        question = f"Who has more {relation_plural}, {name1} or {name2}?"
-        query = [
-            f'aggregate_all(count, distinct({relation}("{name1}", X)), C1)',
-            f'aggregate_all(count, distinct({relation}("{name2}", Y)), C2)',
-            "C1 > C2",
-        ]
+        # Step 3: assemble — outermost relation comes first in the question text
+        if chain_words:
+            text = " ".join(list(reversed(chain_words)) + [anchor_text])
+        else:
+            text = anchor_text
+
+        return {
+            "text": text,
+            "atoms": anchor_atoms + chain_atoms,
+            "endpoint_name": current_person,
+            "endpoint_var": current_var,
+        }
+
+    return None
+
+
+def sample_comparison_count_extended_question(
+    rng: Generator,
+    db: Database,
+    person_name_bank: list[str],
+    person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
+    person_name2relation_and_related: dict[str, list[tuple[str, str]]],
+    num_procs: int,
+    chain_depth: int,
+    mc2: bool,
+    easy_mode: bool = False,
+    num_sampling_attempts: int = 100,
+) -> tuple[str, list[str]] | None:
+    """Sample: 'Who has more <relation_plural>, <left_branch> or <right_branch>?'
+
+    Each branch walks ``chain_depth`` random relation hops from an anchor; the
+    left branch may be anchored by a multi-constraint (``mc2=True``) so the
+    constraint-axis cells get filled. The branch with more of ``<relation>`` at
+    the endpoint wins.
+
+    Prolog query format (the trailing ``LeftAns``/``RightAns`` unifications and
+    bare ``CL > CR`` are read by ``get_extended_answer`` to extract the winner):
+
+        <left anchor + chain atoms>,
+        <right anchor + chain atoms>,
+        aggregate_all(count, distinct(<rel>(<left_endpoint>, _)), CL),
+        aggregate_all(count, distinct(<rel>(<right_endpoint>, _)), CR),
+        LeftAns = <left_endpoint>,
+        RightAns = <right_endpoint>,
+        CL > CR
+    """
+    relation_bank = get_relation_bank(easy_mode)
+
+    for _ in range(num_sampling_attempts):
+        count_rel = relation_bank[rng.integers(0, len(relation_bank))]
+        count_rel_plural = RELATION_PLURAL_ALIAS.get(count_rel, count_rel + "s")
+
+        left = _build_count_branch(
+            rng, db, person_name_bank, person_name2attr_name_and_val,
+            person_name2relation_and_related, num_procs,
+            chain_depth=chain_depth, mc2=mc2, var_prefix="LP", easy_mode=easy_mode,
+        )
+        if left is None:
+            continue
+        right = _build_count_branch(
+            rng, db, person_name_bank, person_name2attr_name_and_val,
+            person_name2relation_and_related, num_procs,
+            chain_depth=chain_depth, mc2=False, var_prefix="RP", easy_mode=easy_mode,
+        )
+        if right is None:
+            continue
+        if left["endpoint_name"] == right["endpoint_name"]:
+            continue
+
+        cl = len(db.query(f'distinct({count_rel}("{left["endpoint_name"]}", X))'))
+        cr = len(db.query(f'distinct({count_rel}("{right["endpoint_name"]}", X))'))
+        if cl == 0 or cr == 0 or cl == cr:
+            continue
+
+        query = (
+            left["atoms"]
+            + right["atoms"]
+            + [
+                f'aggregate_all(count, distinct({count_rel}({left["endpoint_var"]}, _LX)), CL)',
+                f'aggregate_all(count, distinct({count_rel}({right["endpoint_var"]}, _RX)), CR)',
+                f'LeftAns = {left["endpoint_var"]}',
+                f'RightAns = {right["endpoint_var"]}',
+                "CL > CR",
+            ]
+        )
+        question = (
+            f"Who has more {count_rel_plural}, "
+            f"{left['text']} or {right['text']}?"
+        )
         return question, query
 
     return None
@@ -346,10 +523,14 @@ def sample_extended_question(
         return sample_comparison_age_question(
             rng, db, person_name_bank, person_name2attr_name_and_val, num_sampling_attempts
         )
-    elif question_type == COMPARISON_COUNT_TYPE:
-        return sample_comparison_count_question(
-            rng, db, person_name_bank, person_name2relation_and_related,
-            easy_mode, num_sampling_attempts,
+    elif question_type in COMPARISON_COUNT_VARIANTS:
+        chain_depth, mc2 = COMPARISON_COUNT_VARIANTS[question_type]
+        return sample_comparison_count_extended_question(
+            rng, db, person_name_bank,
+            person_name2attr_name_and_val, person_name2relation_and_related,
+            num_procs,
+            chain_depth=chain_depth, mc2=mc2,
+            easy_mode=easy_mode, num_sampling_attempts=num_sampling_attempts,
         )
     elif question_type == MULTI_CONSTRAINT_TYPE:
         return sample_multi_constraint_question(
@@ -405,19 +586,20 @@ def get_extended_answer(
         else:
             return [name2]
 
-    elif question_type == COMPARISON_COUNT_TYPE:
-        joined = ", ".join(query)
-        results = list(db.prolog.query(joined))
-        import re
-
-        m = re.match(r"Who has more .+?, (.+?) or (.+?)\?", question)
-        if not m:
-            return []
-        name1, name2 = m.group(1), m.group(2)
-        if results:
-            return [name1]  # C1 > C2 succeeded
-        else:
-            return [name2]
+    elif question_type in COMPARISON_COUNT_VARIANTS:
+        # Query ends with `LeftAns = ..., RightAns = ..., CL > CR`.
+        # Forward run: extract LeftAns when left wins.
+        # Reverse run (swap CL > CR for CR > CL): extract RightAns when right wins.
+        forward = list(db.prolog.query(", ".join(query)))
+        if forward:
+            return sorted({decode(r["LeftAns"]) for r in forward if "LeftAns" in r})
+        reverse_query = [
+            "CR > CL" if a.strip() == "CL > CR" else a for a in query
+        ]
+        reverse = list(db.prolog.query(", ".join(reverse_query)))
+        if reverse:
+            return sorted({decode(r["RightAns"]) for r in reverse if "RightAns" in r})
+        return []
 
     elif question_type == MULTI_CONSTRAINT_TYPE:
         joined = ", ".join(query)
