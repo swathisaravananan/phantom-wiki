@@ -88,13 +88,13 @@ def caches(db, person_names):
 
 @pytest.fixture(scope="module")
 def base_templates():
-    templates = generate_templates(depth=5, question_types=["base"])
+    templates = generate_templates(max_hops=1, max_constraints=2, question_types=["base"])
     return [t for t in templates if len(t) == 3]
 
 
 @pytest.fixture(scope="module")
 def deep_templates():
-    templates = generate_templates(depth=6, question_types=["base"])
+    templates = generate_templates(max_hops=1, max_constraints=2, question_types=["base"])
     return [t for t in templates if len(t) == 3]
 
 

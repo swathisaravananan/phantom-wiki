@@ -777,6 +777,9 @@ def sample_question(
         if i == 0:
             valid_result = True
 
+    if not valid_result:
+        return None
+
     # We have found a valid query template, we need to prepare the query and question
     # print(f"{query_template_=}")
     joined_query: str = ",,".join(query_template)  # join by ,, because , is used in Prolog queries

@@ -60,7 +60,6 @@ question_parser.add_argument(
 question_parser.add_argument(
     "--num-sampling-attempts", type=int, default=100, help="Number of attempts to sample a valid question"
 )
-question_parser.add_argument("--question-depth", type=int, default=6, help="Depth of the question template")
 question_parser.add_argument(
     "--easy-mode", action="store_true", help="Sample from easy relations (hard mode is default)"
 )
@@ -99,8 +98,8 @@ question_parser.add_argument(
 question_parser.add_argument(
     "--max-hops",
     type=int,
-    default=None,
-    help="Filter questions to maximum hop count (inclusive)",
+    default=4,
+    help="Largest hop count any generated question may have. Drives base CFG depth and chain builders. Also acts as the post-generation filter ceiling.",
 )
 question_parser.add_argument(
     "--min-constraints",
@@ -111,8 +110,8 @@ question_parser.add_argument(
 question_parser.add_argument(
     "--max-constraints",
     type=int,
-    default=None,
-    help="Filter questions to maximum constraint count (inclusive)",
+    default=3,
+    help="Largest attribute-constraint count any generated question may have. Determines mc-N anchor sizes and standalone multi-constraint sizes.",
 )
 question_parser.add_argument(
     "--sample-count",

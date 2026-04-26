@@ -33,53 +33,72 @@ from .sample import RELATION_ALIAS, RELATION_PLURAL_ALIAS, get_relation_bank, ge
 # Question type identifiers
 # ---------------------------------------------------------------------------
 COMPARISON_AGE_TYPE = "comparison_age"
-# Count-comparison variants: each entry maps to a (chain_depth, mc2_left) config
-# in COMPARISON_COUNT_VARIANTS below. Cell targets in the (hops, constraints)
-# matrix when used with the step-3 difficulty splitter:
-#   _TYPE                       chain  mc2   target cell
-COMPARISON_COUNT_TYPE = "comparison_count"                        # 0  False  (1, 0)
-COMPARISON_COUNT_CHAIN1_TYPE = "comparison_count_chain1"          # 1  False  (2, 0)
-COMPARISON_COUNT_CHAIN2_TYPE = "comparison_count_chain2"          # 2  False  (3, 0)
-COMPARISON_COUNT_CHAIN3_TYPE = "comparison_count_chain3"          # 3  False  (4, 0)
-COMPARISON_COUNT_MC2_TYPE = "comparison_count_mc2"                # 0  True   (1, 2)
-COMPARISON_COUNT_CHAIN1_MC2_TYPE = "comparison_count_chain1_mc2"  # 1  True   (2, 2)
-COMPARISON_COUNT_CHAIN2_MC2_TYPE = "comparison_count_chain2_mc2"  # 2  True   (3, 2)
 MULTI_CONSTRAINT_TYPE = "multi_constraint"
 SUPERLATIVE_OLDEST_TYPE = "superlative_oldest"
 SUPERLATIVE_YOUNGEST_TYPE = "superlative_youngest"
 SUPERLATIVE_MOST_TYPE = "superlative_most"
 
-# (chain_depth_per_branch, mc2_on_left_branch) for each count-comparison variant.
-# Right branch is always a named anchor with the same chain depth.
-COMPARISON_COUNT_VARIANTS: dict[str, tuple[int, bool]] = {
-    COMPARISON_COUNT_TYPE: (0, False),
-    COMPARISON_COUNT_CHAIN1_TYPE: (1, False),
-    COMPARISON_COUNT_CHAIN2_TYPE: (2, False),
-    COMPARISON_COUNT_CHAIN3_TYPE: (3, False),
-    COMPARISON_COUNT_MC2_TYPE: (0, True),
-    COMPARISON_COUNT_CHAIN1_MC2_TYPE: (1, True),
-    COMPARISON_COUNT_CHAIN2_MC2_TYPE: (2, True),
-}
 
-EXTENDED_QUESTION_TYPES = [
-    COMPARISON_AGE_TYPE,
-    *COMPARISON_COUNT_VARIANTS.keys(),
-    MULTI_CONSTRAINT_TYPE,
-    SUPERLATIVE_OLDEST_TYPE,
-    SUPERLATIVE_YOUNGEST_TYPE,
-    SUPERLATIVE_MOST_TYPE,
-]
+def _count_variant_type(chain_depth: int, n_attrs: int) -> str:
+    """Canonical name for a comparison_count variant.
 
-# Maps each legacy 1-hop EXTENDED_QUESTION_TYPES entry to its high-level
-# question-type category, so the dataset generator can filter by --question-types.
-EXTENDED_QUESTION_CATEGORY: dict[str, str] = {
-    COMPARISON_AGE_TYPE: "comparison_age",
-    **{t: "comparison_count" for t in COMPARISON_COUNT_VARIANTS},
-    MULTI_CONSTRAINT_TYPE: "multi_constraint",
-    SUPERLATIVE_OLDEST_TYPE: "superlative",
-    SUPERLATIVE_YOUNGEST_TYPE: "superlative",
-    SUPERLATIVE_MOST_TYPE: "superlative",
-}
+    Examples:
+        (0, 0) -> 'comparison_count'                       targets (1, 0)
+        (1, 0) -> 'comparison_count_chain1'                targets (2, 0)
+        (0, 2) -> 'comparison_count_mc2'                   targets (1, 2)
+        (2, 3) -> 'comparison_count_chain2_mc3'            targets (3, 3)
+
+    The +1 in the target hops comes from the aggregate_all that the
+    count-comparison adds on top of the relation chain.
+    """
+    chain = f"_chain{chain_depth}" if chain_depth else ""
+    mc = f"_mc{n_attrs}" if n_attrs else ""
+    return f"comparison_count{chain}{mc}"
+
+
+def build_comparison_count_variants(
+    max_chain_depth: int,
+    n_attrs_options: tuple[int, ...],
+) -> dict[str, tuple[int, int]]:
+    """Build the (variant name -> (chain_depth, n_attrs)) table.
+
+    ``max_chain_depth`` is the largest chain length we'll emit (0..max_chain_depth
+    inclusive). ``n_attrs_options`` lists the attribute-anchor sizes; 0 means a
+    named anchor, >=2 means a multi-constraint anchor with that many attributes.
+    """
+    return {
+        _count_variant_type(c, n): (c, n)
+        for c in range(max_chain_depth + 1)
+        for n in n_attrs_options
+    }
+
+
+def build_extended_question_types(
+    count_variants: dict[str, tuple[int, int]],
+) -> list[str]:
+    return [
+        COMPARISON_AGE_TYPE,
+        *count_variants.keys(),
+        MULTI_CONSTRAINT_TYPE,
+        SUPERLATIVE_OLDEST_TYPE,
+        SUPERLATIVE_YOUNGEST_TYPE,
+        SUPERLATIVE_MOST_TYPE,
+    ]
+
+
+def build_extended_question_category(
+    count_variants: dict[str, tuple[int, int]],
+) -> dict[str, str]:
+    """Map each extended-question type to its top-level category, used by the
+    ``--question-types`` filter in the dataset generator."""
+    return {
+        COMPARISON_AGE_TYPE: "comparison_age",
+        **{t: "comparison_count" for t in count_variants},
+        MULTI_CONSTRAINT_TYPE: "multi_constraint",
+        SUPERLATIVE_OLDEST_TYPE: "superlative",
+        SUPERLATIVE_YOUNGEST_TYPE: "superlative",
+        SUPERLATIVE_MOST_TYPE: "superlative",
+    }
 
 
 def is_extended_question(question: str) -> bool:
@@ -154,7 +173,7 @@ def _build_count_branch(
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     num_procs: int,
     chain_depth: int,
-    mc2: bool,
+    n_attrs: int,
     var_prefix: str,
     easy_mode: bool,
     num_sampling_attempts: int = 50,
@@ -162,8 +181,9 @@ def _build_count_branch(
     """Build one branch of a count-comparison question.
 
     Walks ``chain_depth`` random relation hops from an anchor. The anchor is
-    either a named person or a person uniquely identified by two attribute
-    constraints (``mc2=True``).
+    either a named person (``n_attrs=0``) or a person uniquely identified by
+    ``n_attrs`` attribute constraints (``n_attrs >= 2``; 1 is unsupported here
+    because it overlaps the base CFG path).
 
     Returns a dict with:
       - ``text``: natural-language description of the branch ("the sister of Alice")
@@ -173,11 +193,13 @@ def _build_count_branch(
         (a quoted literal for chain_depth=0 named, otherwise a variable)
     Returns ``None`` if no valid branch can be sampled.
     """
+    if n_attrs == 1:
+        raise ValueError("n_attrs=1 is not supported in comparison_count branches")
     relation_bank = get_relation_bank(easy_mode)
 
     for _ in range(num_sampling_attempts):
         # Step 1: pick the anchor
-        if mc2:
+        if n_attrs >= 2:
             person = person_name_bank[rng.integers(0, len(person_name_bank))]
             attrs = get_vals_and_update_cache(
                 cache=person_name2attr_name_and_val,
@@ -186,29 +208,24 @@ def _build_count_branch(
                 query_bank=ATTRIBUTE_TYPES,
                 num_procs=num_procs,
             )
-            if len(attrs) < 2:
+            if len(attrs) < n_attrs:
                 continue
-            idxs = rng.choice(len(attrs), size=2, replace=False)
-            attr1_name, attr1_val = attrs[idxs[0]]
-            attr2_name, attr2_val = attrs[idxs[1]]
+            idxs = rng.choice(len(attrs), size=n_attrs, replace=False)
+            picked = [attrs[i] for i in idxs]  # list of (name, val)
 
             # Require uniqueness so the branch resolves to exactly one person
-            uniqueness_q = (
-                f'{attr1_name}(X, "{attr1_val}"), {attr2_name}(X, "{attr2_val}")'
+            uniqueness_q = ", ".join(
+                f'{name}(X, "{val}")' for name, val in picked
             )
             if len(list(db.prolog.query(uniqueness_q))) != 1:
                 continue
 
             anchor_var = f"{var_prefix}0"
-            attr1_alias = ATTRIBUTE_ALIASES[attr1_name]
-            attr2_alias = ATTRIBUTE_ALIASES[attr2_name]
-            anchor_text = (
-                f"the person whose {attr1_alias} is {attr1_val} "
-                f"and whose {attr2_alias} is {attr2_val}"
+            anchor_text = "the person " + " and ".join(
+                f"whose {ATTRIBUTE_ALIASES[name]} is {val}" for name, val in picked
             )
             anchor_atoms = [
-                f'{attr1_name}({anchor_var}, "{attr1_val}")',
-                f'{attr2_name}({anchor_var}, "{attr2_val}")',
+                f'{name}({anchor_var}, "{val}")' for name, val in picked
             ]
             current_var = anchor_var
             current_person = person
@@ -269,16 +286,17 @@ def sample_comparison_count_extended_question(
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     num_procs: int,
     chain_depth: int,
-    mc2: bool,
+    n_attrs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
     """Sample: 'Who has more <relation_plural>, <left_branch> or <right_branch>?'
 
     Each branch walks ``chain_depth`` random relation hops from an anchor; the
-    left branch may be anchored by a multi-constraint (``mc2=True``) so the
-    constraint-axis cells get filled. The branch with more of ``<relation>`` at
-    the endpoint wins.
+    left branch's anchor may be a multi-constraint with ``n_attrs`` attributes
+    (``n_attrs=0`` for a named anchor) so the constraint-axis cells get filled.
+    The right branch is always named-anchored. The branch with more of
+    ``<relation>`` at the endpoint wins.
 
     Prolog query format (the trailing ``LeftAns``/``RightAns`` unifications and
     bare ``CL > CR`` are read by ``get_extended_answer`` to extract the winner):
@@ -300,14 +318,14 @@ def sample_comparison_count_extended_question(
         left = _build_count_branch(
             rng, db, person_name_bank, person_name2attr_name_and_val,
             person_name2relation_and_related, num_procs,
-            chain_depth=chain_depth, mc2=mc2, var_prefix="LP", easy_mode=easy_mode,
+            chain_depth=chain_depth, n_attrs=n_attrs, var_prefix="LP", easy_mode=easy_mode,
         )
         if left is None:
             continue
         right = _build_count_branch(
             rng, db, person_name_bank, person_name2attr_name_and_val,
             person_name2relation_and_related, num_procs,
-            chain_depth=chain_depth, mc2=False, var_prefix="RP", easy_mode=easy_mode,
+            chain_depth=chain_depth, n_attrs=0, var_prefix="RP", easy_mode=easy_mode,
         )
         if right is None:
             continue
@@ -348,14 +366,18 @@ def sample_multi_constraint_question(
     person_name_bank: list[str],
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
     num_procs: int,
+    n_attrs: int,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
-    """Sample: 'Who is the person whose <attr_1> is <val_1> and whose <attr_2> is <val_2>?'
+    """Sample: 'Who is the person whose <attr_1> is <val_1> and ... and whose <attr_N> is <val_N>?'
 
-    Prolog query:
-        <attr_1>(X, "<val_1>"), <attr_2>(X, "<val_2>")
+    ``n_attrs`` must be >= 2.
+    Prolog query: <attr_1>(X, "<val_1>"), ..., <attr_N>(X, "<val_N>")
     Answer variable: X
     """
+    if n_attrs < 2:
+        raise ValueError(f"n_attrs must be >= 2 for multi_constraint, got {n_attrs}")
+
     for _ in range(num_sampling_attempts):
         person_name = person_name_bank[rng.integers(0, len(person_name_bank))]
 
@@ -367,23 +389,18 @@ def sample_multi_constraint_question(
             num_procs=num_procs,
         )
 
-        if len(attr_name_and_vals) < 2:
+        if len(attr_name_and_vals) < n_attrs:
             continue
 
-        # Pick two distinct attributes
-        idxs = rng.choice(len(attr_name_and_vals), size=2, replace=False)
-        attr1_name, attr1_val = attr_name_and_vals[idxs[0]]
-        attr2_name, attr2_val = attr_name_and_vals[idxs[1]]
+        idxs = rng.choice(len(attr_name_and_vals), size=n_attrs, replace=False)
+        picked = [attr_name_and_vals[i] for i in idxs]
 
-        # Build question using aliases
-        attr1_alias = ATTRIBUTE_ALIASES[attr1_name]
-        attr2_alias = ATTRIBUTE_ALIASES[attr2_name]
-
-        question = f"Who is the person whose {attr1_alias} is {attr1_val} and whose {attr2_alias} is {attr2_val}?"
-        query = [
-            f'{attr1_name}(X, "{attr1_val}")',
-            f'{attr2_name}(X, "{attr2_val}")',
-        ]
+        question = (
+            "Who is the person "
+            + " and ".join(f"whose {ATTRIBUTE_ALIASES[name]} is {val}" for name, val in picked)
+            + "?"
+        )
+        query = [f'{name}(X, "{val}")' for name, val in picked]
         return question, query
 
     return None
@@ -512,10 +529,15 @@ def sample_extended_question(
     person_name2attr_name_and_val: dict[str, list[tuple[str, str]]],
     person_name2relation_and_related: dict[str, list[tuple[str, str]]],
     num_procs: int,
+    count_variants: dict[str, tuple[int, int]],
+    multi_constraint_n_attrs: int,
     easy_mode: bool = False,
     num_sampling_attempts: int = 100,
 ) -> tuple[str, list[str]] | None:
     """Sample an extended question of the given type.
+
+    ``count_variants`` is the build_comparison_count_variants() table; ``multi_constraint_n_attrs``
+    is the N for the standalone "Who is the person whose A1 is V1 and ..." question.
 
     Returns (question_string, prolog_query_list) or None if sampling fails.
     """
@@ -523,18 +545,20 @@ def sample_extended_question(
         return sample_comparison_age_question(
             rng, db, person_name_bank, person_name2attr_name_and_val, num_sampling_attempts
         )
-    elif question_type in COMPARISON_COUNT_VARIANTS:
-        chain_depth, mc2 = COMPARISON_COUNT_VARIANTS[question_type]
+    elif question_type in count_variants:
+        chain_depth, n_attrs = count_variants[question_type]
         return sample_comparison_count_extended_question(
             rng, db, person_name_bank,
             person_name2attr_name_and_val, person_name2relation_and_related,
             num_procs,
-            chain_depth=chain_depth, mc2=mc2,
+            chain_depth=chain_depth, n_attrs=n_attrs,
             easy_mode=easy_mode, num_sampling_attempts=num_sampling_attempts,
         )
     elif question_type == MULTI_CONSTRAINT_TYPE:
         return sample_multi_constraint_question(
-            rng, db, person_name_bank, person_name2attr_name_and_val, num_procs, num_sampling_attempts
+            rng, db, person_name_bank, person_name2attr_name_and_val, num_procs,
+            n_attrs=multi_constraint_n_attrs,
+            num_sampling_attempts=num_sampling_attempts,
         )
     elif question_type == SUPERLATIVE_OLDEST_TYPE:
         return sample_superlative_age_question(
@@ -560,6 +584,7 @@ def get_extended_answer(
     query: list[str],
     question_type: str,
     db: Database,
+    count_variants: dict[str, tuple[int, int]],
 ) -> list[str]:
     """Execute an extended question's Prolog query and return the answer.
 
@@ -586,7 +611,7 @@ def get_extended_answer(
         else:
             return [name2]
 
-    elif question_type in COMPARISON_COUNT_VARIANTS:
+    elif question_type in count_variants:
         # Query ends with `LeftAns = ..., RightAns = ..., CL > CR`.
         # Forward run: extract LeftAns when left wins.
         # Reverse run (swap CL > CR for CR > CL): extract RightAns when right wins.

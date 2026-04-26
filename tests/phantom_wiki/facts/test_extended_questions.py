@@ -11,21 +11,27 @@ from phantom_wiki.facts import get_database
 from phantom_wiki.facts.attributes.constants import ATTRIBUTE_TYPES
 from phantom_wiki.facts.extended_questions import (
     COMPARISON_AGE_TYPE,
-    COMPARISON_COUNT_TYPE,
-    EXTENDED_QUESTION_TYPES,
     MULTI_CONSTRAINT_TYPE,
     SUPERLATIVE_MOST_TYPE,
     SUPERLATIVE_OLDEST_TYPE,
     SUPERLATIVE_YOUNGEST_TYPE,
+    build_comparison_count_variants,
+    build_extended_question_types,
     get_extended_answer,
     is_extended_question,
     sample_comparison_age_question,
-    sample_comparison_count_question,
+    sample_comparison_count_extended_question,
     sample_extended_question,
     sample_multi_constraint_question,
     sample_superlative_age_question,
     sample_superlative_most_question,
 )
+
+# A reference variants table for tests that need a baseline dispatch dict
+_TEST_COUNT_VARIANTS = build_comparison_count_variants(
+    max_chain_depth=1, n_attrs_options=(0, 2),
+)
+_COMPARISON_COUNT_TYPE = "comparison_count"  # variant key for chain=0, n_attrs=0
 from phantom_wiki.facts.sample import get_vals_and_update_cache
 from phantom_wiki.utils import decode
 from tests.phantom_wiki.facts import DATABASE_SMALL_PATH
@@ -107,7 +113,7 @@ class TestComparisonAge:
         assert result is not None
         question, query = result
 
-        answer = get_extended_answer(question, query, COMPARISON_AGE_TYPE, db)
+        answer = get_extended_answer(question, query, COMPARISON_AGE_TYPE, db, _TEST_COUNT_VARIANTS)
         assert len(answer) == 1
 
         # Verify: the answer should be the person with the earlier DOB
@@ -126,22 +132,28 @@ class TestComparisonAge:
 # ---------------------------------------------------------------------------
 class TestComparisonCount:
     def test_generates_valid_question(self, db, person_names, caches):
-        _, rel_cache = caches
+        attr_cache, rel_cache = caches
         rng = np.random.default_rng(seed=2)
-        result = sample_comparison_count_question(rng, db, person_names, rel_cache)
+        result = sample_comparison_count_extended_question(
+            rng, db, person_names, attr_cache, rel_cache, num_procs=1,
+            chain_depth=0, n_attrs=0,
+        )
         assert result is not None
         question, query = result
         assert question.startswith("Who has more")
         assert question.endswith("?")
 
     def test_answer_is_correct(self, db, person_names, caches):
-        _, rel_cache = caches
+        attr_cache, rel_cache = caches
         rng = np.random.default_rng(seed=2)
-        result = sample_comparison_count_question(rng, db, person_names, rel_cache)
+        result = sample_comparison_count_extended_question(
+            rng, db, person_names, attr_cache, rel_cache, num_procs=1,
+            chain_depth=0, n_attrs=0,
+        )
         assert result is not None
         question, query = result
 
-        answer = get_extended_answer(question, query, COMPARISON_COUNT_TYPE, db)
+        answer = get_extended_answer(question, query, _COMPARISON_COUNT_TYPE, db, _TEST_COUNT_VARIANTS)
         assert len(answer) == 1
         # The answer should be one of the two names in the question
         import re
@@ -158,7 +170,7 @@ class TestMultiConstraint:
     def test_generates_valid_question(self, db, person_names, caches):
         attr_cache, _ = caches
         rng = np.random.default_rng(seed=3)
-        result = sample_multi_constraint_question(rng, db, person_names, attr_cache, num_procs=1)
+        result = sample_multi_constraint_question(rng, db, person_names, attr_cache, num_procs=1, n_attrs=2)
         assert result is not None
         question, query = result
         assert "and whose" in question
@@ -167,11 +179,11 @@ class TestMultiConstraint:
     def test_answer_contains_original_person(self, db, person_names, caches):
         attr_cache, _ = caches
         rng = np.random.default_rng(seed=3)
-        result = sample_multi_constraint_question(rng, db, person_names, attr_cache, num_procs=1)
+        result = sample_multi_constraint_question(rng, db, person_names, attr_cache, num_procs=1, n_attrs=2)
         assert result is not None
         question, query = result
 
-        answer = get_extended_answer(question, query, MULTI_CONSTRAINT_TYPE, db)
+        answer = get_extended_answer(question, query, MULTI_CONSTRAINT_TYPE, db, _TEST_COUNT_VARIANTS)
         # The answer should include at least one person
         assert len(answer) >= 1
         # All answers should be valid persons
@@ -212,7 +224,7 @@ class TestSuperlativeAge:
         )
         assert result is not None
         question, query = result
-        answer = get_extended_answer(question, query, SUPERLATIVE_OLDEST_TYPE, db)
+        answer = get_extended_answer(question, query, SUPERLATIVE_OLDEST_TYPE, db, _TEST_COUNT_VARIANTS)
         assert len(answer) >= 1
 
         # Verify the answer is the oldest among the relation group
@@ -262,7 +274,8 @@ class TestSampleExtended:
         for qtype in basic_types:
             rng = np.random.default_rng(seed=42)
             result = sample_extended_question(
-                qtype, rng, db, person_names, attr_cache, rel_cache, num_procs=1
+                qtype, rng, db, person_names, attr_cache, rel_cache, num_procs=1,
+                count_variants=_TEST_COUNT_VARIANTS, multi_constraint_n_attrs=2,
             )
             assert result is not None, f"Failed to generate question of type {qtype}"
 
@@ -271,5 +284,6 @@ class TestSampleExtended:
         rng = np.random.default_rng(seed=42)
         with pytest.raises(ValueError):
             sample_extended_question(
-                "invalid_type", rng, db, person_names, attr_cache, rel_cache, num_procs=1
+                "invalid_type", rng, db, person_names, attr_cache, rel_cache, num_procs=1,
+                count_variants=_TEST_COUNT_VARIANTS, multi_constraint_n_attrs=2,
             )
