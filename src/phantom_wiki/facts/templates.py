@@ -182,6 +182,9 @@ def generate_templates(
         fragments = _generate_tail_template_fragments(grammar, [start], depth, depth)
         for fragment in fragments:
             templates.append((fragment.q_fragment, fragment.p_fragment, fragment.p_answer))
+        # Add chain templates the base CFG cannot generate: mc-c anchors and
+        # mid-chain single-position constraints.
+        templates += _build_chain_rc_base_templates(max_hops, max_constraints)
 
     extended_types = set(question_types) - {QUESTION_TYPE_BASE}
     if extended_types:
@@ -310,73 +313,206 @@ def _count_hops(fragment: "Fragment") -> int:
     )
 
 
-def _build_explicit_chain_rc_fragment(
+# Sequential subscript-window allocation for chain fragments.
+# Each fragment owns a disjoint window [offset, offset + STRIDE).
+# STRIDE is chosen large enough that fragment renumbering (adds <100) cannot
+# cause any two fragments' windows to overlap.
+CHAIN_FRAGMENT_OFFSET_BASE = 1000
+CHAIN_FRAGMENT_OFFSET_STRIDE = 1000
+
+
+def _build_chain_rc_fragment(
     n_hops: int,
-    anchor_kind: str,
+    c_count: int,
+    c_position: int,
     offset: int,
 ) -> "Fragment":
-    """Build an R_c fragment with exactly n_hops relation placeholders.
+    """Build an R_c chain fragment with c_count attribute filters at one position.
 
-    Bypasses the CFG depth limit to unlock (hops>=3, constraints>=2) cells.
-    Used by the mc2 and superlative builders to add deeper chain variants.
+    A chain "Who is the <rel_0> of the <rel_1> of ... <anchor>?" with at most one
+    decorated person along the chain. The structural knobs are:
 
-    Args:
-        n_hops: Number of chained <relation> placeholders (>= 1).
-        anchor_kind: 'name' or 'attr' — the innermost anchor.
-        offset: Starting index for all placeholder/variable subscripts.
-            Must be chosen to avoid collisions with CFG-generated fragments
-            (indices <= ~20 at depth=6) and mc2 fragments (60-61 at depth=6).
+      n_hops:     number of relations in the chain (>= 1)
+      c_count:    number of attribute filters on a single person (0 = none)
+      c_position: which person carries the filters; 1..n_hops where n_hops is
+                  the anchor and k in 1..n_hops-1 is intermediate Y_k. Ignored
+                  when c_count == 0.
 
-    Chain semantics (Prolog reads ``rel(X, Y)`` as "Y is rel of X"):
-        answer = Y_{offset}
-        rel_0(Y_1, Y_0), rel_1(Y_2, Y_1), ..., rel_{n-1}(anchor, Y_{n-1})
+    The chain produces persons Y_0..Y_n where the question phrase "the <rel_k>"
+    refers to Y_k (the result of relation k). So a relative clause constraining
+    Y_k must follow "the <rel_k>" in the surface form. Y_0 is the answer and
+    not directly constrainable here.
+
+    Three cases:
+      c_count == 0:                       pure-name chain (anchor = <name>)
+      c_count >= 1 and c_position == n_hops: anchor carries the filters (mc-c
+        anchor; subsumes the legacy single-attr anchor at c=1)
+      c_count >= 1 and c_position <  n_hops: an intermediate Y_{c_position}
+        carries the filters; the anchor is a <name>
+
+    Subscript layout (all variables/placeholders live in [offset, offset + STRIDE)):
+      answer  = Y_{offset}
+      Y_i     = Y_{offset + i}    for i in 1..n_hops-1   (intermediates)
+      anchor  = Y_{offset + n_hops}                      (only when anchor is a
+                                                          person variable)
+      relation_i, name, attribute_*  use disjoint subscripts in the same window.
     """
-    assert n_hops >= 1, "n_hops must be >= 1"
-    assert anchor_kind in ("name", "attr")
+    assert n_hops >= 0, f"n_hops must be >= 0, got {n_hops}"
+    assert c_count >= 0, f"c_count must be >= 0, got {c_count}"
+    if c_count > 0:
+        assert 0 <= c_position <= n_hops, (
+            f"c_position must be in 0..{n_hops}, got {c_position}"
+        )
+    if n_hops == 0:
+        # Pure anchor (no chain): only meaningful with attribute filters.
+        assert c_count > 0 and c_position == 0, (
+            "n_hops=0 requires c_count >= 1 and c_position = 0 (the anchor)"
+        )
 
     q: list[str] = []
     p: list[str] = []
 
-    for i in range(n_hops):
-        q.extend(["the", f"<relation>_{offset + i}", "of"])
+    def _attr_clause(target_var: str) -> str:
+        """Build "<an>_1 is <av>_1 and <an>_2 is <av>_2 ..." and append the
+        corresponding Prolog atoms to ``p``."""
+        parts = []
+        for k in range(c_count):
+            an = f"<attribute_name>_{offset + n_hops + 1 + k}"
+            av = f"<attribute_value>_{offset + n_hops + 1 + k}"
+            parts.append(f"{an} is {av}")
+            p.append(f"{an}({target_var}, {av})")
+        return " and ".join(parts)
 
-    if anchor_kind == "name":
-        anchor_arg = f"<name>_{offset + n_hops}"
-        q.append(anchor_arg)
-    else:  # attr
-        attr_n = f"<attribute_name>_{offset + n_hops}"
-        attr_v = f"<attribute_value>_{offset + n_hops}"
-        anchor_arg = f"Y_{offset + n_hops}"
-        q.extend(["the person whose", attr_n, "is", attr_v])
+    for i in range(n_hops):
+        rel_token = f"<relation>_{offset + i}"
+        # Mid-chain clause goes after the noun referring to Y_i, i.e. when
+        # i == c_position. The clause + commas is glued into one token so
+        # " ".join does not insert spaces before the commas.
+        if c_count > 0 and c_position == i and 1 <= c_position < n_hops:
+            q.append(f"the {rel_token}, whose {_attr_clause(f'Y_{offset + i}')}, of")
+        else:
+            q.extend(["the", rel_token, "of"])
+
+    # Anchor: <name>, or mc-c anchor when c_count >= 1 at the end of the chain.
+    if c_count > 0 and c_position == n_hops:
+        anchor_var = f"Y_{offset + n_hops}"
+        q.append(f"the person whose {_attr_clause(anchor_var)}")
+    else:
+        anchor_var = f"<name>_{offset + n_hops}"
+        q.append(anchor_var)
 
     for i in range(n_hops):
         outer = f"Y_{offset + i}"
-        inner = anchor_arg if i == n_hops - 1 else f"Y_{offset + i + 1}"
+        if i == n_hops - 1:
+            inner = anchor_var
+        else:
+            inner = f"Y_{offset + i + 1}"
         p.append(f"<relation>_{offset + i}({inner}, {outer})")
-
-    if anchor_kind == "attr":
-        p.append(f"<attribute_name>_{offset + n_hops}({anchor_arg}, <attribute_value>_{offset + n_hops})")
 
     return Fragment(q_fragment=q, p_fragment=p, p_answer=f"Y_{offset}")
 
 
 def _build_deep_rc_fragments(max_hops: int) -> list["Fragment"]:
-    """Build explicit R_c fragments for 2..max_hops-hop chains (name and attr anchors).
+    """Plain-anchor R_c chains (name or single-attr) for extended composers.
 
-    Provides the deeper chains the CFG grammar cannot reach at its depth cap.
-    Used by the mc-N composers (which add the constraint axis) and the superlative
-    builder (which adds the +1 outer relation).
+    Used by ``_build_comparison_mc_n_templates`` and ``_build_superlative_*``
+    composers, which pair these chains with mc-N branches to add constraints.
+    Produces only the configurations these composers need: 2..max_hops hops,
+    name- or single-attr-anchored. Sequential offset windows.
     """
     fragments: list[Fragment] = []
-    # Each (n_hops, anchor) gets a 20-wide subscript slot starting at 200 to
-    # stay clear of CFG (<=~20) and mc-N (n*depth*10) fragment subscripts.
-    i = 0
-    for n_hops in range(2, max_hops + 1):
-        for anchor in ("name", "attr"):
-            offset = 200 + i * 20
-            fragments.append(_build_explicit_chain_rc_fragment(n_hops, anchor, offset))
-            i += 1
+    for idx, (n_hops, c_count, c_position) in enumerate(
+        (n_hops, c, p)
+        for n_hops in range(2, max_hops + 1)
+        for (c, p) in [(0, 0), (1, n_hops)]
+    ):
+        offset = CHAIN_FRAGMENT_OFFSET_BASE + idx * CHAIN_FRAGMENT_OFFSET_STRIDE
+        fragments.append(_build_chain_rc_fragment(n_hops, c_count, c_position, offset))
     return fragments
+
+
+def _build_chain_rc_base_templates(
+    max_hops: int, max_constraints: int
+) -> list[tuple]:
+    """Base templates with single-position constraints on the chain.
+
+    Enumerates ``(n_hops, c, p)`` with ``1 <= n_hops <= max_hops``,
+    ``1 <= c <= max_constraints``, ``1 <= p <= n_hops``. Skips ``(c=1, p=n_hops)``
+    because the base CFG already produces "Who is the <rel> of ... of the person
+    whose AN is AV?" via natural recursion, and we want a single source of truth
+    per (hops, constraints, position) cell.
+
+    Each chain is wrapped into the three top-level question forms the CFG
+    supports, so the new (h, c) cells are filled across question categories:
+
+      * "Who is <chain>?"               — answer is the chain's terminal person
+      * "What is the AN of <chain>?"    — answer is an attribute of that person
+      * "How many RN_p does <chain> have?" — answer is a count
+
+    Each emitted chain fills one of:
+      * (h>=1, c>=2, p=h):   mc-c anchor — "...of the person whose A1 is V1 and whose A2 is V2?"
+      * (h>=1, c>=1, p<h):   mid-chain — "...the friend, whose A1 is V1, of <name>?"
+
+    Offsets sit above the deep_rc range so the two builders cannot collide.
+    """
+    templates: list[tuple] = []
+    base_offset = CHAIN_FRAGMENT_OFFSET_BASE + 1_000_000  # well above _build_deep_rc_fragments
+    idx = 0
+    for n_hops in range(0, max_hops + 1):
+        for c in range(1, max_constraints + 1):
+            # n_hops=0: only one position (the anchor itself); no mid-chain.
+            positions = [0] if n_hops == 0 else range(1, n_hops + 1)
+            for p in positions:
+                # CFG already produces single-attr anchored "the person whose
+                # AN is AV" chains, so skip (c=1, p=n_hops) to avoid duplicates.
+                # TODO: open question — drop the "person whose AN is AV" branch
+                # from QA_GRAMMAR_STRING and let this builder be the single
+                # source of truth for all "whose"-clause constraints (c >= 1
+                # at any position). Would unify mid-chain, mc-anchor, and
+                # single-attr anchor into one code path; currently deferred
+                # because the CFG path is exercised by golden-file fixtures
+                # (templates_depth_*.json) that would need refreshing.
+                if c == 1 and p == n_hops:
+                    continue
+                offset = base_offset + idx * CHAIN_FRAGMENT_OFFSET_STRIDE
+                idx += 1
+                frag = _build_chain_rc_fragment(n_hops, c, p, offset)
+                templates += _wrap_chain_in_top_level_forms(frag, offset)
+    return templates
+
+
+def _wrap_chain_in_top_level_forms(frag: "Fragment", offset: int) -> list[tuple]:
+    """Wrap a chain fragment in the three S-productions of QA_GRAMMAR_STRING.
+
+    Uses subscripts well above the chain's own window (offset + 500..) so the
+    wrapper placeholders cannot collide with the chain's variables.
+    """
+    chain_person = frag.p_answer
+    wrap_sub = offset + 500
+    out: list[tuple] = []
+
+    # 1. "Who is <chain> ?"
+    q_who = ["Who is"] + frag.q_fragment + ["?"]
+    out.append((q_who, frag.p_fragment, frag.p_answer))
+
+    # 2. "What is the <attribute_name> of <chain> ?"
+    attr_n = f"<attribute_name>_{wrap_sub}"
+    attr_y = f"Y_{wrap_sub}"
+    q_what = ["What is", "the", attr_n, "of"] + frag.q_fragment + ["?"]
+    p_what = [f"{attr_n}({chain_person}, {attr_y})"] + frag.p_fragment
+    out.append((q_what, p_what, attr_y))
+
+    # 3. "How many <relation_plural> does <chain> have ?"
+    rel_p = f"<relation_plural>_{wrap_sub + 1}"
+    count_y = f"Y_{wrap_sub + 1}"
+    count_v = f"Count_{wrap_sub + 1}"
+    q_many = ["How many", rel_p, "does"] + frag.q_fragment + ["have", "?"]
+    p_many = [
+        f"aggregate_all(count, distinct({rel_p}({chain_person}, {count_y})), {count_v})"
+    ] + frag.p_fragment
+    out.append((q_many, p_many, count_v))
+
+    return out
 
 
 def _build_comparison_mc_n_templates(

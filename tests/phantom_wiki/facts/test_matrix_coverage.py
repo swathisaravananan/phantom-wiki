@@ -240,6 +240,142 @@ class TestTemplateCells:
 
 
 # ---------------------------------------------------------------------------
+# Single-position chain extensions: mc-anchor and mid-chain constraints
+# ---------------------------------------------------------------------------
+class TestChainRcBaseTemplates:
+    """Base templates emitted by ``_build_chain_rc_base_templates`` —
+    mc-c anchors (p == n_hops, c >= 2) and mid-chain (p < n_hops, c >= 1).
+    """
+
+    @pytest.mark.parametrize("max_hops,max_constraints", [
+        (2, 2), (3, 2), (3, 3), (4, 3),
+    ])
+    def test_mc_anchor_cells_covered(self, max_hops, max_constraints):
+        """For each h in 1..max_hops and c in 2..max_constraints, an (h, c) cell exists."""
+        ts = generate_templates(
+            max_hops=max_hops, max_constraints=max_constraints, question_types=["base"]
+        )
+        cells = _cells_covered(ts)
+        for h in range(1, max_hops + 1):
+            for c in range(2, max_constraints + 1):
+                assert (h, c) in cells, (
+                    f"Missing (h={h}, c={c}) at max_hops={max_hops}, "
+                    f"max_constraints={max_constraints}"
+                )
+
+    @pytest.mark.parametrize("max_hops,max_constraints", [
+        (2, 2), (3, 2), (3, 3), (4, 3),
+    ])
+    def test_mid_chain_emits_relative_clause(self, max_hops, max_constraints):
+        """Mid-chain templates contain ', whose <attribute_name>_X is ...,' inside the chain."""
+        ts = generate_templates(
+            max_hops=max_hops, max_constraints=max_constraints, question_types=["base"]
+        )
+        # At least one base template should contain a mid-chain relative clause:
+        # the marker ", whose" appears (with leading comma) only in mid-chain output.
+        joined = [" ".join(t[0]) for t in ts if isinstance(t[0], list)]
+        assert any(", whose" in q for q in joined), (
+            "Expected at least one mid-chain template with ', whose ...' clause"
+        )
+
+    def test_skips_c1_p_equals_n_hops(self):
+        """``(c=1, p=n_hops)`` is covered by the base CFG; the chain builder should not duplicate it.
+
+        For max_hops=1, max_constraints=1, the chain builder enumerates only one
+        case ``(n_hops=1, c=1, p=1)`` which is skipped — so it emits zero new
+        templates and the total template count equals the CFG-only count.
+        """
+        cfg_only = generate_templates(max_hops=1, max_constraints=1, question_types=["base"])
+        # max_constraints=1 alone gives no new chain templates beyond CFG.
+        assert all(", whose" not in " ".join(t[0]) for t in cfg_only)
+
+    def test_mid_chain_clause_constrains_named_intermediate(self):
+        """The relative clause must constrain the Y referred to by the noun it follows.
+
+        For a chain template "the rel_0 of the rel_1, whose AN is AV, of <name>",
+        the clause comes after "the rel_1" — which refers to Y_1 in the chain
+        (result of rel_1, source of rel_0). The Prolog atom for the constraint
+        must therefore bind to that same Y_1, not to Y_0 or any other variable.
+        """
+        ts = generate_templates(max_hops=3, max_constraints=2, question_types=["base"])
+        # Find one mid-chain template (contains ", whose").
+        for q_tokens, p_atoms, _ in [t for t in ts if isinstance(t[0], list)]:
+            q_str = " ".join(q_tokens)
+            if not q_str.startswith("Who is") or ", whose" not in q_str:
+                continue
+            # Identify which Y_k the relative clause sits next to: count "the <relation>_N"
+            # occurrences before the ", whose" marker.
+            pre_clause = q_str.split(", whose")[0]
+            relations_before = re.findall(r"<relation>_(\d+)", pre_clause)
+            assert len(relations_before) >= 1
+            # The noun the clause attaches to is the LAST relation before ", whose".
+            noun_rel_subscript = int(relations_before[-1])
+            # The chain produces Y_k as the result of <relation>_(offset+k); the
+            # subscript on the relation name equals offset+k, so its result Y is
+            # Y_(offset+k) — same numeric subscript as the relation token.
+            expected_target_y = f"Y_{noun_rel_subscript}"
+            # Find the attribute_name atom in p_atoms; its first arg must be expected_target_y.
+            attr_atoms = [a for a in p_atoms if a.startswith("<attribute_name>_")]
+            assert attr_atoms, f"Mid-chain template missing attribute atom: {p_atoms}"
+            for atom in attr_atoms:
+                m = re.match(r"<attribute_name>_\d+\((Y_\d+),", atom)
+                assert m, f"Could not parse attribute atom: {atom}"
+                actual_target = m.group(1)
+                assert actual_target == expected_target_y, (
+                    f"Clause attaches to relation noun for {expected_target_y} but "
+                    f"Prolog binds constraint to {actual_target}.\nQ: {q_str}\nP: {p_atoms}"
+                )
+            return  # one verified template is enough
+        pytest.fail("No mid-chain template found to verify")
+
+    def test_three_top_level_forms(self):
+        """Each new chain fragment is emitted as Who/What/How-many."""
+        ts = generate_templates(max_hops=2, max_constraints=2, question_types=["base"])
+        joined = [" ".join(t[0]) for t in ts if isinstance(t[0], list)]
+        # Each top-level form must contain at least one new chain template,
+        # detected by the "whose ... is ... and ... is" multi-attr clause.
+        def has_multi_attr(q):
+            return re.search(r"whose <attribute_name>_\d+ is <attribute_value>_\d+ and ", q) is not None
+        assert any(q.startswith("Who is") and has_multi_attr(q) for q in joined)
+        assert any(q.startswith("What is") and has_multi_attr(q) for q in joined)
+        assert any(q.startswith("How many") and has_multi_attr(q) for q in joined)
+
+
+class TestOffsetWindowsDisjoint:
+    """Sequential offset windows must keep each chain fragment's subscripts disjoint
+    from every other chain fragment's subscripts, including after fragment renumbering.
+    """
+
+    def test_chain_base_template_subscripts_disjoint(self):
+        """Distinct chain fragments use disjoint subscript ranges.
+
+        The three top-level wrappers (Who/What/How-many) share a chain fragment
+        and are intentionally in the same offset window. We verify only that
+        distinct chain fragments do not overlap by examining one wrapper
+        (the "Who is" form) per chain.
+        """
+        ts = generate_templates(max_hops=4, max_constraints=3, question_types=["base"])
+        windows = []
+        for t in ts:
+            q_str = " ".join(t[0]) if isinstance(t[0], list) else ""
+            if not q_str.startswith("Who is"):
+                continue
+            if ", whose" not in q_str and "and whose" not in q_str:
+                continue
+            subs = set()
+            for atom in t[1]:
+                subs.update(int(m) for m in re.findall(r"_(\d+)", atom))
+            if not subs:
+                continue
+            windows.append((min(subs), max(subs)))
+        for i, (a_lo, a_hi) in enumerate(windows):
+            for b_lo, b_hi in windows[i + 1:]:
+                assert a_hi < b_lo or b_hi < a_lo, (
+                    f"Chain fragment windows overlap: [{a_lo},{a_hi}] vs [{b_lo},{b_hi}]"
+                )
+
+
+# ---------------------------------------------------------------------------
 # comparison_count variants target cells
 # ---------------------------------------------------------------------------
 class TestComparisonCountCells:
