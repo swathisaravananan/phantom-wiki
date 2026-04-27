@@ -6,7 +6,7 @@ import textwrap
 
 import matplotlib.pyplot as plt
 
-HOPS_VALUES = [0, 1, 2, 3, 4]
+HOPS_VALUES = [0, 1, 2, 3, 4, 5, 6]
 CONSTR_VALUES = [0, 1, 2, 3]
 
 

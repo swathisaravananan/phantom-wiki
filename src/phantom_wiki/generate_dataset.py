@@ -184,7 +184,7 @@ def generate_dataset(
     balanced: bool = False,
     min_difficulty: int = None,
     max_difficulty: int = None,
-    question_types: str = None,
+    question_types: str = "base",
     min_hops: int = None,
     min_constraints: int = None,
     sample_count: int = None,
@@ -192,7 +192,7 @@ def generate_dataset(
     sample_max_steps: int = None,
     sample_types: str = None,
     describe_pool: bool = False,
-    sampling_method: str = "backward",
+    sampling_method: str = "bidirectional",
     anchor_strategy: str = "random",
     answer_position: str = "head",
 ) -> None:
@@ -553,7 +553,7 @@ def generate_dataset(
                         "prolog": {"query": queries[j], "answer": str(answer_info)},
                         "template": question_template,
                         "type": len(base_templates) + tmpl_idx,
-                        "difficulty": compute_difficulty(queries[j]),
+                        "difficulty": compute_difficulty(queries[j], answer_var=str(answer_info)),
                         "is_aggregation_question": False,
                         "question_category": question_subtype,
                     }
@@ -608,7 +608,7 @@ def generate_dataset(
                         "prolog": {"query": queries[j], "answer": "X"},
                         "template": [qtype],
                         "type": len(base_templates) + len(extended_cfg_templates) + extended_question_types.index(qtype),
-                        "difficulty": compute_difficulty(queries[j]),
+                        "difficulty": compute_difficulty(queries[j], answer_var="X"),
                         "is_aggregation_question": False,
                         "question_category": qtype,
                     }
@@ -644,7 +644,7 @@ def generate_dataset(
                 "prolog": {"query": query, "answer": answer},
                 "template": question_template,
                 "type": i,  # this references the template type
-                "difficulty": compute_difficulty(query),
+                "difficulty": compute_difficulty(query, answer_var=answer),
                 "is_aggregation_question": is_aggregation_question(question),
             }
             # Add sampling metadata for bidirectional sampling

@@ -297,7 +297,70 @@ def _score_atoms(atoms: list[str], hop_counts: dict[str, int]) -> tuple[int, int
     return hops, constraints
 
 
-def compute_difficulty(query_template: list[str]) -> dict:
+def _compute_constraint_position(
+    query_template: list[str],
+    answer_var: str,
+    hop_counts: dict[str, int],
+) -> int | None:
+    """Hop-weighted shortest-path distance from ``answer_var`` to a
+    literal-bound (constrained) attribute var. ``hop_counts[rel]`` weights
+    each relation edge — so ``grandfather`` contributes 2. ``aggregate_all``
+    edges use the inner relation's hop count. Attribute *extraction* atoms
+    (var second arg) contribute 0. Returns ``None`` if no constraint or no
+    path. Anchor-end constraints in linear chains yield position == hops.
+    """
+    if answer_var is None:
+        return None
+
+    constrained: set[str] = set()
+    for atom in query_template:
+        pred, args = _parse_predicate(atom)
+        if pred in _ATTRIBUTE_SET and len(args) >= 2 and _is_quoted_literal(args[1]):
+            constrained.add(args[0].strip())
+    if not constrained:
+        return None
+    if answer_var in constrained:
+        return 0
+
+    import heapq
+    from collections import defaultdict
+
+    adj: dict[str, list[tuple[str, int]]] = defaultdict(list)
+
+    def _add_edge(a: str, b: str, cost: int) -> None:
+        if _is_quoted_literal(a) or _is_quoted_literal(b):
+            return
+        adj[a].append((b, cost))
+        adj[b].append((a, cost))
+
+    for atom in query_template:
+        pred, args = _parse_predicate(atom)
+        if pred in hop_counts and len(args) == 2:
+            _add_edge(args[0].strip(), args[1].strip(), hop_counts[pred])
+        elif pred in _ATTRIBUTE_SET and len(args) >= 2 and not _is_quoted_literal(args[1]):
+            _add_edge(args[0].strip(), args[1].strip(), 0)
+        elif pred == "aggregate_all" and len(args) >= 3:
+            inner = re.search(r"distinct\((\w+)\(([^,]+),\s*([^)]+)\)\)", atom)
+            if inner and inner.group(1) in hop_counts:
+                _add_edge(inner.group(2).strip(), args[-1].strip(), hop_counts[inner.group(1)])
+
+    dist: dict[str, int] = {answer_var: 0}
+    heap: list[tuple[int, str]] = [(0, answer_var)]
+    while heap:
+        d, node = heapq.heappop(heap)
+        if d > dist.get(node, float("inf")):
+            continue
+        if node in constrained:
+            return d
+        for nb, cost in adj[node]:
+            nd = d + cost
+            if nd < dist.get(nb, float("inf")):
+                dist[nb] = nd
+                heapq.heappush(heap, (nd, nb))
+    return None
+
+
+def compute_difficulty(query_template: list[str], *, answer_var: str | None = None) -> dict:
     """Compute structured difficulty from a Prolog query template.
 
     For two-branch comparison queries (CmpDL/CmpDR pattern), hops and
@@ -305,12 +368,12 @@ def compute_difficulty(query_template: list[str]) -> dict:
     used — an agent can resolve both branches in parallel, so difficulty
     is determined by the harder branch, not the sum.
 
-    Args:
-        query_template: List of Prolog query atoms as produced by
-            ``generate_templates()`` or sampled questions.
+    When ``answer_var`` is provided, ``constraint_position`` is added: the
+    hop-weighted distance from the answer to the constrained var (see
+    :func:`_compute_constraint_position`).
 
-    Returns:
-        Dict with keys ``hops``, ``constraints``, ``composite``.
+    Returns dict with keys ``hops``, ``constraints``, ``composite``, and
+    (when ``answer_var`` is provided) ``constraint_position``.
     """
     hop_counts = derive_relation_hop_counts()
 
@@ -322,8 +385,13 @@ def compute_difficulty(query_template: list[str]) -> dict:
     else:
         hops, constraints = _score_atoms(query_template, hop_counts)
 
-    return {
+    result = {
         "hops": hops,
         "constraints": constraints,
         "composite": hops + constraints,
     }
+    if answer_var is not None:
+        result["constraint_position"] = _compute_constraint_position(
+            query_template, answer_var, hop_counts
+        )
+    return result

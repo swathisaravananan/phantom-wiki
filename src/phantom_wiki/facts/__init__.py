@@ -86,8 +86,8 @@ question_parser.add_argument(
 question_parser.add_argument(
     "--question-types",
     type=str,
-    default=None,
-    help="Comma-separated question types to generate: base,comparison_age,comparison_count,multi_constraint,superlative (default: all)",
+    default="base",
+    help="Comma-separated question types to generate: base,comparison_age,comparison_count,multi_constraint,superlative (default: base)",
 )
 question_parser.add_argument(
     "--min-hops",
@@ -145,9 +145,9 @@ question_parser.add_argument(
 question_parser.add_argument(
     "--sampling-method",
     type=str,
-    default="backward",
+    default="bidirectional",
     choices=["backward", "bidirectional"],
-    help="Sampling method for question generation (default: backward)",
+    help="Sampling method for question generation (default: bidirectional)",
 )
 question_parser.add_argument(
     "--anchor-strategy",
